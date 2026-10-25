@@ -1,9 +1,9 @@
 # Two-level logic minimization.
 #
-# espresso() is a heuristic in the style of Espresso-II: cubes are expanded
-# as far as the complement of the function allows, redundant cubes are
-# removed, and reduce/expand/irredundant passes are repeated while the cover
-# keeps shrinking. The result is irredundant, not necessarily minimum.
+# espresso() is a quick heuristic using the first steps of Espresso-II: cubes
+# are expanded as far as the complement of the function allows, then
+# redundant cubes are removed. The result is irredundant, not necessarily
+# minimum.
 #
 # fit() uses a SAT solver to find a cover with at most a given number of
 # cubes, which is what a macro cell needs, when the heuristic misses one.
@@ -149,32 +149,6 @@ class _Cover:
                 result = rest
         return result
 
-    def reduce(self, cover):
-        # Shrink each cube to the smallest cube containing the part of it
-        # that no other cube covers
-        result = sorted(cover, key=lambda c: (-self.size(c), c))
-        for k, cube in enumerate(result):
-            rest = result[:k] + result[k + 1:]
-            uncovered = self.complement(self.cofactor(rest, cube))
-            supercube = 0
-            for c in uncovered:
-                supercube |= c
-            result[k] = cube & supercube
-        return [c for c in result if not self.empty(c)]
-
-    def cost(self, cover):
-        literals = sum(self.n - self.size(c) for c in cover)
-        return (len(cover), literals)
-
-    def minimize(self, cover, offset):
-        cover = self.irredundant(self.expand(cover, offset))
-        while True:
-            candidate = self.irredundant(
-                self.expand(self.reduce(cover), offset))
-            if self.cost(candidate) >= self.cost(cover):
-                return cover
-            cover = candidate
-
 
 def _parse(cube):
     value = 0
@@ -204,7 +178,7 @@ def espresso(ninputs, cubes, complement=False):
     if not cover:
         return []
 
-    minimized = space.minimize(cover, offset)
+    minimized = space.irredundant(space.expand(cover, offset))
     return sorted(_format(cube, ninputs) for cube in minimized)
 
 
