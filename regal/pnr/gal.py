@@ -120,6 +120,14 @@ class Cell:
             raise PnrError("Cannot find a driver for bit {}".format(bit))
         return driver
 
+    def _follow(self, netlist, bit, pins):
+        # Driver of a signal feeding this macro cell, or the name of the
+        # signal if it is assigned to a pin (input or feedback)
+        netname = netlist.get_netname(bit, pins)
+        if netname in pins:
+            return None, netname
+        return self._get_driver(netlist, bit, pins), None
+
     def invert(self):
         _logger.info("Inverting output of macro cell %s", self.outpad)
         self.fuse_xor ^= 1
@@ -160,26 +168,33 @@ class Cell:
         self.fuse_xor = 1
 
         if type(bit) is int:
+            source = None
             driver = self._get_driver(netlist, bit, pins)
 
             if driver is not None and driver["type"] == "GAL_DFF":
                 clock = netlist.get_netname(driver["connections"]["C"][0])
                 self.set_registered(clock, pins)
                 bit = driver["connections"]["D"][0]
-                driver = self._get_driver(netlist, bit, pins)
+                driver, source = self._follow(netlist, bit, pins)
 
             if driver is not None and driver["type"] == "GAL_XOR":
                 self.invert()
                 bit = driver["connections"]["A"][0]
-                driver = self._get_driver(netlist, bit, pins)
+                driver, source = self._follow(netlist, bit, pins)
 
-            if driver is None:
-                self.configure_buffer(netlist.get_input_netname(bit, pins),
-                                      pins)
-            elif driver["type"] == "GAL_SOP":
+            if driver is not None and driver["type"] == "GAL_SOP":
                 self.configure_and_array(netlist, driver, pins)
-            else:
+            elif driver is not None and driver["type"] != "GAL_DFF":
                 raise PnrError("Unknown cell type: {}".format(driver["type"]))
+            else:
+                # Copy of a single signal: an input, another macro cell or a
+                # register that is not an output yet
+                if source is None:
+                    source = netlist.get_input_netname(bit, pins) or \
+                        netlist.get_netname(bit, pins)
+                if source not in pins:
+                    self.gal.place_internal(netlist, bit, source, pins)
+                self.configure_buffer(source, pins)
         elif bit == "1":
             self.invert()
         elif bit != "0":
@@ -253,7 +268,7 @@ class Gal:
     def expand(self, netlist, bit, pins):
         # Function of a signal as a SOP of assigned signals, with every
         # internal combinational signal it depends on inlined. None if that
-        # is not possible (registers, unassigned inputs) or too large.
+        # is not possible (unassigned inputs) or too large.
         if bit in self._expansions:
             return self._expansions[bit]
         self._expansions[bit] = None
@@ -268,7 +283,7 @@ class Gal:
             result = sop_not(
                 self.expand(netlist, driver["connections"]["A"][0], pins))
         elif driver["type"] == "GAL_SOP":
-            result = self.expand_sop(netlist, driver, pins)
+            result = minimize(self.expand_sop(netlist, driver, pins))
         else:
             result = None
 
@@ -415,7 +430,17 @@ class Gal:
     def pnr(self, netlist, pins):
         # Internal signals get added to pins as they are placed
         pins = dict(pins)
-        for netname, pin, direction in list(netlist.get_ios(pins)):
+        ios = list(netlist.get_ios(pins))
+
+        # Registers that are not outputs need a macro cell of their own:
+        # reserve them first so that logic using them can treat them as pins
+        registers = []
+        for bit in netlist.get_register_bits():
+            netname = netlist.get_netname(bit, pins)
+            if netname not in pins:
+                registers.append((self._take_spare(netname, pins), bit))
+
+        for netname, pin, direction in ios:
             if direction == "output":
                 cell = self.get_cell(pin)
                 if cell.used:
@@ -430,6 +455,9 @@ class Gal:
                     pass
                 else:
                     cell.configure_as_input()
+
+        for cell, bit in registers:
+            cell.configure(netlist, bit, pins)
 
 
 class GalXXv8(Gal):

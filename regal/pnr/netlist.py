@@ -52,6 +52,11 @@ class Netlist:
                 return name
         return None
 
+    def get_register_bits(self):
+        return [cell["connections"]["Q"][0]
+                for cell in self.top["cells"].values()
+                if cell["type"] == "GAL_DFF"]
+
     def get_netname(self, bit, prefer=()):
         # A bit can carry several netnames: return one from prefer if possible
         names = [name for name, netname in self.top["netnames"].items()

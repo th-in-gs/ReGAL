@@ -31,7 +31,7 @@ def synth(outfile, *infiles, **kwargs):
         "techmap",
         "opt -nodffe -nosdff",
         "dfflegalize -cell $_DFF_P_ 01",
-        "abc -sop -P 8 -I 16",
+        "aigmap",
         "opt -nodffe -nosdff",
         "techmap -map {}".format(map_file),
         "opt -nodffe -nosdff",

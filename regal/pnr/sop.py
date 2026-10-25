@@ -52,16 +52,7 @@ def sop_and(a, b):
 
 
 def sop_not(sop):
-    if sop is None:
-        return None
-    # De Morgan: ~(t0 | t1 | ...) = ~t0 & ~t1 & ..., with ~t a sum of the
-    # complemented literals of t
-    out = [frozenset()]
-    for term in sop:
-        out = sop_and(out, [frozenset([(n, not p)]) for n, p in term])
-        if out is None:
-            return None
-    return out
+    return minimize(sop, complement=True)
 
 
 def minimize(sop, complement=False):

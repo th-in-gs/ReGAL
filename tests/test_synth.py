@@ -1,7 +1,29 @@
 import os
 import pytest
 import json
+import yaml
+
 import regal
+
+from galsim import assert_equivalent
+
+
+def _check(tmpdir, rtl, cfg, jedec):
+    # The fuse map must behave like the reference one: comparing them byte
+    # for byte would tie the tests to one Yosys version
+    netlist = tmpdir.join("netlist.json")
+    assert regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
+
+    out = tmpdir.join("out.jed")
+    cfg = os.path.join("tests", "samples", cfg)
+    assert regal.pnr(str(netlist), cfg, str(out))
+
+    with open(cfg, "r") as f:
+        pins = yaml.safe_load(f)["pins"]
+    with open(str(netlist), "r") as f:
+        ports = json.load(f)["modules"]["top"]["ports"]
+    assert_equivalent(os.path.join("tests", "samples", jedec), str(out),
+                      pins, ports)
 
 
 _samples_simple = [
@@ -36,41 +58,17 @@ _samples_complex = [
 
 @pytest.mark.parametrize("rtl,jedec", _samples_simple)
 def test_synth_simple(tmpdir, rtl, jedec):
-    netlist = tmpdir.join("netlist.json")
-    regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
-
-    out = tmpdir.join("out.jed")
-    cfg = os.path.join("tests", "samples", "device.yaml")
-    regal.pnr(str(netlist), cfg, str(out))
-
-    with open(os.path.join("tests", "samples", jedec), "r") as f:
-        assert f.read() == out.read()
+    _check(tmpdir, rtl, "device.yaml", jedec)
 
 
 @pytest.mark.parametrize("rtl,jedec", _samples_registered)
 def test_synth_registered(tmpdir, rtl, jedec):
-    netlist = tmpdir.join("netlist.json")
-    regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
-
-    out = tmpdir.join("out.jed")
-    cfg = os.path.join("tests", "samples", "device_reg.yaml")
-    regal.pnr(str(netlist), cfg, str(out))
-
-    with open(os.path.join("tests", "samples", jedec), "r") as f:
-        assert f.read() == out.read()
+    _check(tmpdir, rtl, "device_reg.yaml", jedec)
 
 
 @pytest.mark.parametrize("rtl,jedec", _samples_complex)
 def test_synth_complex(tmpdir, rtl, jedec):
-    netlist = tmpdir.join("netlist.json")
-    regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
-
-    out = tmpdir.join("out.jed")
-    cfg = os.path.join("tests", "samples", "device_complex.yaml")
-    regal.pnr(str(netlist), cfg, str(out))
-
-    with open(os.path.join("tests", "samples", jedec), "r") as f:
-        assert f.read() == out.read()
+    _check(tmpdir, rtl, "device_complex.yaml", jedec)
 
 
 # Designs that need internal signals placed on spare macro cells
@@ -83,12 +81,4 @@ _samples_spare = [
 
 @pytest.mark.parametrize("rtl,cfg,jedec", _samples_spare)
 def test_synth_spare(tmpdir, rtl, cfg, jedec):
-    netlist = tmpdir.join("netlist.json")
-    regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
-
-    out = tmpdir.join("out.jed")
-    cfg = os.path.join("tests", "samples", cfg)
-    regal.pnr(str(netlist), cfg, str(out))
-
-    with open(os.path.join("tests", "samples", jedec), "r") as f:
-        assert f.read() == out.read()
+    _check(tmpdir, rtl, cfg, jedec)
