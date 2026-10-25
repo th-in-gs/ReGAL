@@ -6,7 +6,7 @@
 # Operations return None once a SOP grows past MAX_TERMS, far more than a
 # macro cell can hold, to keep the expansion bounded.
 
-from quine_mccluskey.qm import QuineMcCluskey
+from regal.espresso import espresso
 
 MAX_TERMS = 64
 
@@ -64,33 +64,22 @@ def sop_not(sop):
     return out
 
 
-def minimize(sop, complement=False, max_vars=12):
-    # Two-level minimization (of the complement if asked) through the truth
-    # table. Returns None if there are too many variables to enumerate.
+def minimize(sop, complement=False):
+    # Two-level minimization of a SOP (or of its complement if asked)
     if sop is None:
         return None
     names = sorted({name for term in sop for name, _ in term})
-    if len(names) > max_vars:
-        return None
-
-    def value(term, minterm):
-        return all(((minterm >> names.index(name)) & 1) == polarity
-                   for name, polarity in term)
-
-    ones = [m for m in range(1 << len(names))
-            if any(value(term, m) for term in sop) != complement]
-    if not ones:
-        return []
-    if len(ones) == 1 << len(names):
-        return [frozenset()]
+    cubes = []
+    for term in sop:
+        polarities = dict(term)
+        cubes.append("".join(
+            "-" if name not in polarities else "1" if polarities[name] else "0"
+            for name in names
+        ))
 
     result = []
-    for implicant in sorted(QuineMcCluskey().simplify(ones,
-                                                       num_bits=len(names))):
-        term = []
-        for i, c in enumerate(implicant):
-            name = names[len(names) - 1 - i]
-            if c != "-":
-                term.append((name, c == "1"))
-        result.append(frozenset(term))
+    for cube in espresso(len(names), cubes, complement):
+        result.append(frozenset(
+            (name, c == "1") for name, c in zip(names, cube) if c != "-"
+        ))
     return result

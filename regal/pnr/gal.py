@@ -28,9 +28,7 @@ def _fit(terms, depth):
         return terms, False
     for inverted in (False, True):
         fitted = minimize(terms, inverted)
-        if fitted is None and inverted:
-            fitted = sop_not(terms)
-        if fitted is not None and len(fitted) <= depth:
+        if len(fitted) <= depth:
             return fitted, inverted
     return None
 
@@ -333,7 +331,7 @@ class Gal:
         registers = [bit for bit in internal if expansions[bit] is None]
         full = build({bit: expansions[bit] for bit in candidates})
         if full is not None and len(full) > depth:
-            full = minimize(full) or full
+            full = minimize(full)
         chunks = None
         if full is not None and len(placed) > len(registers):
             chunks = self._plan_split(full, depth, pins, len(registers))

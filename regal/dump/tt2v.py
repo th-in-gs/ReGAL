@@ -1,9 +1,10 @@
 import csv
 import json
 import logging
-from quine_mccluskey.qm import QuineMcCluskey
 from multiprocessing import Pool
 from collections import defaultdict
+
+from regal.espresso import espresso
 
 _logger = logging.getLogger("regal_dump")
 _logger.addHandler(logging.NullHandler())
@@ -25,13 +26,13 @@ def read_io_names(header):
 
 
 def _simplify(expr):
-    name, entries = expr
+    name, width, entries = expr
     _logger.debug("Simplifying %s...", entries)
-    if entries == [0]:
-        _tt_simplified = "0"
+    if entries:
+        cubes = ["{:0{}b}".format(entry, width) for entry in entries]
+        _tt_simplified = espresso(width, cubes)
     else:
-        qm = QuineMcCluskey()
-        _tt_simplified = qm.simplify(entries)
+        _tt_simplified = None
     _logger.debug("%s: %s", name, _tt_simplified)
     return _tt_simplified
 
@@ -68,7 +69,9 @@ def tt2v(infile, outfile, clock=None, seq=[]):
     with Pool() as p:
         tt_simplified = p.map(
             _simplify,
-            [(output, tt[output]) for output in outputs]
+            [(output,
+              len(outputs) if output in seq else len(inputs),
+              tt[output]) for output in outputs]
         )
 
     with open(outfile, "w+") as f:
