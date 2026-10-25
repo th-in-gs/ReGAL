@@ -77,6 +77,7 @@ def test_synth_complex(tmpdir, rtl, jedec):
 _samples_spare = [
     ("parity.v", "device_spare.yaml", "parity.jed"),
     ("hidden.v", "device_hidden.yaml", "hidden.jed"),
+    ("cpu.v", "device_cpu.yaml", "cpu.jed"),
 ]
 
 

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from regal.pnr.exception import PnrError
 from regal.pnr.jedec import Jedec
+from regal.pnr.sop import literal, minimize, sop_and, sop_not, sop_or
 
 _logger = logging.getLogger("regal_pnr")
 _logger.addHandler(logging.NullHandler())
@@ -16,6 +17,22 @@ def _get_param(cell, name):
     if isinstance(value, str):
         value = int(value, 2)
     return value
+
+
+def _fit(terms, depth):
+    # Implementation of a SOP in at most depth terms, possibly minimized or
+    # complemented (the output XOR can invert it): (terms, inverted) or None
+    if terms is None:
+        return None
+    if len(terms) <= depth:
+        return terms, False
+    for inverted in (False, True):
+        fitted = minimize(terms, inverted)
+        if fitted is None and inverted:
+            fitted = sop_not(terms)
+        if fitted is not None and len(fitted) <= depth:
+            return fitted, inverted
+    return None
 
 
 class Cell:
@@ -38,69 +55,65 @@ class Cell:
 
         self.used = False
 
-    def _connect_input(self, netname, pins, table):
-        _logger.info("Connecting input %s to macro cell %d", netname, self.outpad)
-        try:
-            inpad = pins[netname]
-        except KeyError:
-            raise PnrError("No IO assigned for netname {}".format(netname))
+    def _write_terms(self, terms, pins):
+        if frozenset() in terms:
+            # Constant 1: an empty product term cannot be expressed in the
+            # array (a line with no fuse blown is the unused, always false
+            # line), so implement it as an inverted constant 0
+            self.invert()
+            terms = []
 
-        try:
-            index_input = self.inputs.index(inpad)
-        except ValueError:
-            raise PnrError("Pad {} cannot be assigned as input".format(inpad))
-        _logger.debug("Position of netname %s: %d", netname, index_input)
-
-        for i in range(self.depth - int(self.has_oe())):
-            idx = (i + int(self.has_oe())) * self.width + (index_input * 2)
-            self.fuses_and_array[idx] = table[i * 2] ^ 1
-            self.fuses_and_array[idx + 1] = table[i * 2 + 1] ^ 1
-
-    def _get_input_table(self, sop, index):
-        sop_table = _get_param(sop, "TABLE")
-        sop_depth = _get_param(sop, "DEPTH")
-        sop_width = _get_param(sop, "WIDTH")
-
-        if sop_depth > self.get_useable_depth():
+        if len(terms) > self.get_useable_depth():
             raise PnrError(
                 "Pin {}: sum-of-product cannot fit in the macro-cell. "
                 "(Depth: {}, Max: {})".format(
-                    self.outpad, sop_depth, self.get_useable_depth()
+                    self.outpad, len(terms), self.get_useable_depth()
                 )
             )
 
-        table = []
-        for i in range(index * 2, self.depth * sop_width * 2, sop_width * 2):
-            table.append((sop_table >> (i + 1) & 1))
-            table.append((sop_table >> i & 1))
+        for i, term in enumerate(terms):
+            row = (i + int(self.has_oe())) * self.width
+            for netname, polarity in sorted(term):
+                _logger.info("Connecting input %s%s to macro cell %d",
+                             "" if polarity else "~", netname, self.outpad)
+                try:
+                    inpad = pins[netname]
+                except KeyError:
+                    raise PnrError(
+                        "No IO assigned for netname {}".format(netname))
 
-        _logger.debug("Input table %d: %s", index, table)
-        return table
+                try:
+                    index_input = self.inputs.index(inpad)
+                except ValueError:
+                    raise PnrError(
+                        "Pad {} cannot be assigned as input".format(inpad))
+
+                self.fuses_and_array[row + index_input * 2 +
+                                     int(not polarity)] = 0
 
     def configure_and_array(self, netlist, sop, pins):
         _logger.info("Configuring AND-array for macro cell {}".format(self.outpad))
 
-        for input_name, connection in sop["connections"].items():
-            if not input_name.startswith("I"):
-                continue
-            index = int(input_name[1:])
-            connection = connection[0]
-            if connection != "0":
-                netname = netlist.get_netname(connection, pins)
-                if netname not in pins:
-                    self.gal.place_internal(netlist, connection, netname,
-                                            pins)
-                self._connect_input(netname, pins,
-                                    self._get_input_table(sop, index))
+        label = [n for n, pin in pins.items() if pin == self.outpad][0]
+        terms = self.gal.expand_sop(netlist, sop, pins,
+                                    self.get_useable_depth(), label)
+
+        fitted = _fit(terms, self.get_useable_depth())
+        if fitted is not None:
+            terms, inverted = fitted
+            if inverted:
+                _logger.info("Using complement of macro cell %s function",
+                             self.outpad)
+                self.invert()
+
+        self._write_terms(terms, pins)
 
     def configure_buffer(self, netname, pins):
         # Yosys optimizes "assign out = in;" down to a plain wire, leaving no
-        # GAL_SOP cell to map. Emulate a single product term using the input
-        # non-inverted ("10" in $sop TABLE encoding).
+        # GAL_SOP cell to map, so use a single product term with the input
         _logger.info("Configuring macro cell %s as a buffer of %s",
                      self.outpad, netname)
-        table = [1, 0] + [0, 0] * (self.depth - 1)
-        self._connect_input(netname, pins, table)
+        self._write_terms(literal(netname), pins)
 
     def _get_driver(self, netlist, bit, pins):
         # Returns None when the bit comes straight from an assigned input
@@ -111,7 +124,7 @@ class Cell:
 
     def invert(self):
         _logger.info("Inverting output of macro cell %s", self.outpad)
-        self.fuse_xor = 0
+        self.fuse_xor ^= 1
 
     def set_registered(self, clock, pins):
         _logger.info(
@@ -162,15 +175,6 @@ class Cell:
                 bit = driver["connections"]["A"][0]
                 driver = self._get_driver(netlist, bit, pins)
 
-            if driver is not None and driver["type"] == "GAL_SOP":
-                if _get_param(driver, "WIDTH") == 1:
-                    upstream = driver["connections"]["I0"][0]
-                    if netlist.get_netname(upstream, pins) not in pins:
-                        _logger.info("Inverter SOP detected: %s", upstream)
-                        self.invert()
-                        bit = upstream
-                        driver = self._get_driver(netlist, bit, pins)
-
             if driver is None:
                 self.configure_buffer(netlist.get_input_netname(bit, pins),
                                       pins)
@@ -212,6 +216,8 @@ class Gal:
         else:
             raise ValueError("Invalid GAL mode: {}".format(mode))
 
+        self._expansions = {}
+
         self.cells = []
         for outpad in outpads:
             self.cells.append(Cell(self, mode, outpad, self.inpads))
@@ -225,30 +231,188 @@ class Gal:
                 return cell
         raise KeyError
 
+    def _sop_terms(self, sop):
+        # Product terms of a GAL_SOP cell as lists of (bit, polarity)
+        table = _get_param(sop, "TABLE")
+        width = _get_param(sop, "WIDTH")
+        depth = _get_param(sop, "DEPTH")
+        inputs = [sop["connections"]["I{}".format(j)][0] for j in range(width)]
+
+        terms = []
+        for k in range(depth):
+            term = []
+            for j, bit in enumerate(inputs):
+                if bit == "0":
+                    continue
+                i = (k * width + j) * 2
+                if table >> (i + 1) & 1:
+                    term.append((bit, True))
+                if table >> i & 1:
+                    term.append((bit, False))
+            terms.append(term)
+        return terms
+
+    def expand(self, netlist, bit, pins):
+        # Function of a signal as a SOP of assigned signals, with every
+        # internal combinational signal it depends on inlined. None if that
+        # is not possible (registers, unassigned inputs) or too large.
+        if bit in self._expansions:
+            return self._expansions[bit]
+        self._expansions[bit] = None
+
+        netname = netlist.get_netname(bit, pins)
+        driver = netlist.find_driver(bit)
+        if netname in pins:
+            result = literal(netname)
+        elif driver is None or driver["type"] == "GAL_DFF":
+            result = None
+        elif driver["type"] == "GAL_XOR":
+            result = sop_not(
+                self.expand(netlist, driver["connections"]["A"][0], pins))
+        elif driver["type"] == "GAL_SOP":
+            result = self.expand_sop(netlist, driver, pins)
+        else:
+            result = None
+
+        self._expansions[bit] = result
+        return result
+
+    def expand_sop(self, netlist, sop, pins, depth=None, label=None):
+        # SOP of a GAL_SOP cell in terms of assigned signals. Without a depth,
+        # all internal signals are inlined (None if impossible). With the
+        # depth of the macro cell implementing it (named label), internal
+        # signals are inlined as long as the result fits, smallest first, and
+        # the others are placed on spare macro cells. If inlining everything
+        # and splitting the terms over spare macro cells takes fewer of them,
+        # that is done instead.
+        terms = self._sop_terms(sop)
+
+        internal = []
+        for term in terms:
+            for bit, _ in term:
+                if netlist.get_netname(bit, pins) not in pins and \
+                   bit not in internal:
+                    internal.append(bit)
+
+        def build(inlined):
+            result = []
+            for term in terms:
+                product = [frozenset()]
+                for bit, polarity in term:
+                    if bit in inlined:
+                        factor = inlined[bit] if polarity \
+                            else sop_not(inlined[bit])
+                    else:
+                        factor = literal(netlist.get_netname(bit, pins),
+                                         polarity)
+                    product = sop_and(product, factor)
+                result = sop_or(result, product)
+            return result
+
+        expansions = {bit: self.expand(netlist, bit, pins) for bit in internal}
+
+        if depth is None:
+            if None in expansions.values():
+                return None
+            return build(expansions)
+
+        def fits(result):
+            return _fit(result, depth) is not None
+
+        inlined = {}
+        candidates = [bit for bit in internal if expansions[bit] is not None]
+        for bit in sorted(candidates, key=lambda b: len(expansions[b])):
+            trial = dict(inlined)
+            trial[bit] = expansions[bit]
+            if fits(build(trial)):
+                _logger.info("Inlining internal signal %s",
+                             netlist.get_netname(bit, pins))
+                inlined = trial
+
+        placed = [bit for bit in internal if bit not in inlined]
+        registers = [bit for bit in internal if expansions[bit] is None]
+        full = build({bit: expansions[bit] for bit in candidates})
+        if full is not None and len(full) > depth:
+            full = minimize(full) or full
+        chunks = None
+        if full is not None and len(placed) > len(registers):
+            chunks = self._plan_split(full, depth, pins, len(registers))
+        # Placed signals that do not fit in a macro cell need more spare
+        # cells themselves, while split terms never do
+        cost = sum(1 if expansions[bit] is None or
+                   len(expansions[bit]) < depth else 2 for bit in placed)
+        if chunks is not None and \
+           (len(registers) + len(chunks) <= cost or
+            not fits(build(inlined))):
+            placed = registers
+
+        for bit in placed:
+            netname = netlist.get_netname(bit, pins)
+            if netname not in pins:
+                self.place_internal(netlist, bit, netname, pins)
+
+        if placed is registers and chunks is not None:
+            result = full[sum(len(chunk) for chunk in chunks):]
+            for k, chunk in enumerate(chunks):
+                netname = "{}_part{}".format(label, k)
+                cell = self._take_spare(netname, pins)
+                cell.fuse_xor = 1
+                cell._write_terms(chunk, pins)
+                cell.used = True
+                result += literal(netname)
+            return result
+
+        result = build(inlined)
+        if result is None:
+            raise PnrError("Sum-of-product too large for netname {}".format(
+                netlist.get_netname(sop["connections"]["O"][0], pins)))
+        return result
+
+    def _spare_cells(self, pins):
+        # Unused macro cells whose output feeds back into the AND-array, from
+        # the end of the list, which is usually the last to be assigned by hand
+        return [cell for cell in reversed(self.cells)
+                if not cell.used and cell.outpad in self.inpads and
+                cell.outpad not in pins.values()]
+
+    def _take_spare(self, netname, pins):
+        spares = self._spare_cells(pins)
+        if not spares:
+            raise PnrError(
+                "No IO assigned for netname {} and no spare macro cell with "
+                "feedback left to place it on".format(netname)
+            )
+        cell = spares[0]
+        _logger.warning(
+            "Internal signal %s placed on spare pin %d "
+            "(leave this pin unconnected)", netname, cell.outpad
+        )
+        pins[netname] = cell.outpad
+        return cell
+
+    def _plan_split(self, terms, depth, pins, reserved):
+        # Chunks of terms to move to spare macro cells (after the first
+        # reserved ones) so that the remaining terms plus one term per chunk
+        # fit in depth. None if there are not enough spare macro cells.
+        spares = self._spare_cells(pins)[reserved:]
+        chunks = []
+        start = 0
+        while len(terms) - start + len(chunks) > depth:
+            if len(chunks) == len(spares):
+                return None
+            size = spares[len(chunks)].get_useable_depth()
+            chunks.append(terms[start:start + size])
+            start += size
+        return chunks
+
     def place_internal(self, netlist, bit, netname, pins):
         # Place an internal signal (one with no pin assigned, typically a
-        # node created by abc) on a spare macro cell whose output feeds back
-        # into the AND-array. Spare cells are taken from the end of the list,
-        # which is usually the last to be assigned by hand.
-        for cell in reversed(self.cells):
-            if cell.used or cell.outpad not in self.inpads or \
-               cell.outpad in pins.values():
-                continue
-
-            _logger.warning(
-                "Internal signal %s placed on spare pin %d "
-                "(leave this pin unconnected)", netname, cell.outpad
-            )
-            # Assign the pin first so that feedback loops through registers
-            # find it instead of placing the signal again
-            pins[netname] = cell.outpad
-            cell.configure(netlist, bit, pins)
-            return
-
-        raise PnrError(
-            "No IO assigned for netname {} and no spare macro cell with "
-            "feedback left to place it on".format(netname)
-        )
+        # node created by abc or a register that is not an output) on a spare
+        # macro cell. The pin is assigned before configuring the cell so that
+        # feedback loops through registers find it instead of placing the
+        # signal again.
+        cell = self._take_spare(netname, pins)
+        cell.configure(netlist, bit, pins)
 
     def pnr(self, netlist, pins):
         # Internal signals get added to pins as they are placed
