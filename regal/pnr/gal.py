@@ -19,7 +19,8 @@ def _get_param(cell, name):
 
 
 class Cell:
-    def __init__(self, gal_mode, outpad, inputs, depth=8):
+    def __init__(self, gal, gal_mode, outpad, inputs, depth=8):
+        self.gal = gal
         self.gal_mode = gal_mode
         self.outpad = outpad
         self.inputs = inputs
@@ -85,7 +86,10 @@ class Cell:
             index = int(input_name[1:])
             connection = connection[0]
             if connection != "0":
-                netname = netlist.get_netname(connection)
+                netname = netlist.get_netname(connection, pins)
+                if netname not in pins:
+                    self.gal.place_internal(netlist, connection, netname,
+                                            pins)
                 self._connect_input(netname, pins,
                                     self._get_input_table(sop, index))
 
@@ -161,7 +165,7 @@ class Cell:
             if driver is not None and driver["type"] == "GAL_SOP":
                 if _get_param(driver, "WIDTH") == 1:
                     upstream = driver["connections"]["I0"][0]
-                    if netlist.get_netname(upstream) not in pins.keys():
+                    if netlist.get_netname(upstream, pins) not in pins:
                         _logger.info("Inverter SOP detected: %s", upstream)
                         self.invert()
                         bit = upstream
@@ -210,7 +214,7 @@ class Gal:
 
         self.cells = []
         for outpad in outpads:
-            self.cells.append(Cell(mode, outpad, self.inpads))
+            self.cells.append(Cell(self, mode, outpad, self.inpads))
 
         _logger.info("GAL%dV%d configured in %s mode",
                      len(inpads), len(outpads), mode)
@@ -221,8 +225,35 @@ class Gal:
                 return cell
         raise KeyError
 
+    def place_internal(self, netlist, bit, netname, pins):
+        # Place an internal signal (one with no pin assigned, typically a
+        # node created by abc) on a spare macro cell whose output feeds back
+        # into the AND-array. Spare cells are taken from the end of the list,
+        # which is usually the last to be assigned by hand.
+        for cell in reversed(self.cells):
+            if cell.used or cell.outpad not in self.inpads or \
+               cell.outpad in pins.values():
+                continue
+
+            _logger.warning(
+                "Internal signal %s placed on spare pin %d "
+                "(leave this pin unconnected)", netname, cell.outpad
+            )
+            # Assign the pin first so that feedback loops through registers
+            # find it instead of placing the signal again
+            pins[netname] = cell.outpad
+            cell.configure(netlist, bit, pins)
+            return
+
+        raise PnrError(
+            "No IO assigned for netname {} and no spare macro cell with "
+            "feedback left to place it on".format(netname)
+        )
+
     def pnr(self, netlist, pins):
-        for netname, pin, direction in netlist.get_ios(pins):
+        # Internal signals get added to pins as they are placed
+        pins = dict(pins)
+        for netname, pin, direction in list(netlist.get_ios(pins)):
             if direction == "output":
                 cell = self.get_cell(pin)
                 if cell.used:

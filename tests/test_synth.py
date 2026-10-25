@@ -71,3 +71,23 @@ def test_synth_complex(tmpdir, rtl, jedec):
 
     with open(os.path.join("tests", "samples", jedec), "r") as f:
         assert f.read() == out.read()
+
+
+# Designs that need internal signals placed on spare macro cells
+_samples_spare = [
+    ("parity.v", "device_spare.yaml", "parity.jed"),
+    ("hidden.v", "device_hidden.yaml", "hidden.jed"),
+]
+
+
+@pytest.mark.parametrize("rtl,cfg,jedec", _samples_spare)
+def test_synth_spare(tmpdir, rtl, cfg, jedec):
+    netlist = tmpdir.join("netlist.json")
+    regal.synth(str(netlist), os.path.join("tests", "samples", rtl))
+
+    out = tmpdir.join("out.jed")
+    cfg = os.path.join("tests", "samples", cfg)
+    regal.pnr(str(netlist), cfg, str(out))
+
+    with open(os.path.join("tests", "samples", jedec), "r") as f:
+        assert f.read() == out.read()

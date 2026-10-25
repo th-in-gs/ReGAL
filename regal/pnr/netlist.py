@@ -52,11 +52,16 @@ class Netlist:
                 return name
         return None
 
-    def get_netname(self, bit):
-        for name, netname in self.top["netnames"].items():
-            if bit in netname["bits"]:
+    def get_netname(self, bit, prefer=()):
+        # A bit can carry several netnames: return one from prefer if possible
+        names = [name for name, netname in self.top["netnames"].items()
+                 if bit in netname["bits"]]
+        if not names:
+            raise PnrError("Cannot find netname for bit {}".format(bit))
+        for name in names:
+            if name in prefer:
                 return name
-        raise PnrError("Cannot find netname for bit {}".format(bit))
+        return names[0]
 
     def get_ios(self, pins):
         for netname, pin in pins.items():

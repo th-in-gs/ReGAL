@@ -1,0 +1,9 @@
+device: GAL16V8
+mode: simple
+pins:
+    I0: 2
+    I1: 3
+    I2: 4
+    I3: 5
+    I4: 6
+    O: 19

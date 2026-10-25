@@ -105,6 +105,18 @@ endmodule
 
 ![Netlist](examples/reg/netlist.png)
 
+### Internal signals
+
+Signals that are not assigned to a pin in the configuration file, such as
+internal registers or intermediate logic that does not fit in a single
+macro cell, are automatically placed on spare macro cells whose output feeds
+back into the AND-array. The output pins of these macro cells are driven, so
+they must be left unconnected:
+
+```console
+[WARN ][regal_pnr] Internal signal Clk2 placed on spare pin 12 (leave this pin unconnected)
+```
+
 ### Supported devices
 
 - GAL16V8 (simple, complex and registered mode)
