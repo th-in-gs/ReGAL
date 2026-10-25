@@ -89,6 +89,22 @@ class Cell:
                 self._connect_input(netname, pins,
                                     self._get_input_table(sop, index))
 
+    def configure_buffer(self, netname, pins):
+        # Yosys optimizes "assign out = in;" down to a plain wire, leaving no
+        # GAL_SOP cell to map. Emulate a single product term using the input
+        # non-inverted ("10" in $sop TABLE encoding).
+        _logger.info("Configuring macro cell %s as a buffer of %s",
+                     self.outpad, netname)
+        table = [1, 0] + [0, 0] * (self.depth - 1)
+        self._connect_input(netname, pins, table)
+
+    def _get_driver(self, netlist, bit, pins):
+        # Returns None when the bit comes straight from an assigned input
+        driver = netlist.find_driver(bit)
+        if driver is None and netlist.get_input_netname(bit, pins) is None:
+            raise PnrError("Cannot find a driver for bit {}".format(bit))
+        return driver
+
     def invert(self):
         _logger.info("Inverting output of macro cell %s", self.outpad)
         self.fuse_xor = 0
@@ -129,26 +145,32 @@ class Cell:
         self.fuse_xor = 1
 
         if type(bit) is int:
-            driver = netlist.get_driver(bit)
+            driver = self._get_driver(netlist, bit, pins)
 
-            if driver["type"] == "GAL_DFF":
+            if driver is not None and driver["type"] == "GAL_DFF":
                 clock = netlist.get_netname(driver["connections"]["C"][0])
                 self.set_registered(clock, pins)
-                driver = netlist.get_driver(driver["connections"]["D"][0])
+                bit = driver["connections"]["D"][0]
+                driver = self._get_driver(netlist, bit, pins)
 
-            if driver["type"] == "GAL_XOR":
+            if driver is not None and driver["type"] == "GAL_XOR":
                 self.invert()
-                driver = netlist.get_driver(driver["connections"]["A"][0])
+                bit = driver["connections"]["A"][0]
+                driver = self._get_driver(netlist, bit, pins)
 
-            if driver["type"] == "GAL_SOP":
+            if driver is not None and driver["type"] == "GAL_SOP":
                 if _get_param(driver, "WIDTH") == 1:
                     upstream = driver["connections"]["I0"][0]
                     if netlist.get_netname(upstream) not in pins.keys():
                         _logger.info("Inverter SOP detected: %s", upstream)
                         self.invert()
-                        driver = netlist.get_driver(upstream)
+                        bit = upstream
+                        driver = self._get_driver(netlist, bit, pins)
 
-            if driver["type"] == "GAL_SOP":
+            if driver is None:
+                self.configure_buffer(netlist.get_input_netname(bit, pins),
+                                      pins)
+            elif driver["type"] == "GAL_SOP":
                 self.configure_and_array(netlist, driver, pins)
             else:
                 raise PnrError("Unknown cell type: {}".format(driver["type"]))

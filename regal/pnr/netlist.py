@@ -23,7 +23,7 @@ class Netlist:
                            format(netname, len(bits)))
         return bits[0]
 
-    def get_driver(self, bit):
+    def find_driver(self, bit):
         for cell_name, cell in self.top["cells"].items():
             for connection_name, bits in cell["connections"].items():
                 if bit in bits and \
@@ -33,7 +33,24 @@ class Netlist:
                             bit, cell_name
                         )
                        return cell
-        raise PnrError("Cannot find a driver for bit {}".format(bit))
+        return None
+
+    def get_driver(self, bit):
+        driver = self.find_driver(bit)
+        if driver is None:
+            raise PnrError("Cannot find a driver for bit {}".format(bit))
+        return driver
+
+    def get_input_netname(self, bit, pins):
+        # Name of the assigned input port carrying this bit, if any. Used when
+        # a bit is wired straight to an input without any cell in between
+        # (e.g. "assign out = in;"), in which case the input port may share
+        # the bit with other netnames.
+        for name, port in self.top["ports"].items():
+            if port["direction"] == "input" and name in pins and \
+               port["bits"] == [bit]:
+                return name
+        return None
 
     def get_netname(self, bit):
         for name, netname in self.top["netnames"].items():

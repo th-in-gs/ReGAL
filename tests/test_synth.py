@@ -13,6 +13,7 @@ _samples_simple = [
     ("v1.v", "v1.jed"),
     ("v0.v", "v0.jed"),
     ("fb.v", "fb.jed"),
+    ("buf.v", "buf.jed"),
 ]
 
 _samples_registered = [
@@ -28,6 +29,7 @@ _samples_complex = [
     ("xor.v", "xorc.jed"),
     ("v1.v", "v1c.jed"),
     ("v0.v", "v0c.jed"),
+    ("buf.v", "bufc.jed"),
 ]
 
 
