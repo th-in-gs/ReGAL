@@ -5,7 +5,8 @@ from datetime import datetime
 
 from regal.pnr.exception import PnrError
 from regal.pnr.jedec import Jedec
-from regal.pnr.sop import literal, minimize, sop_and, sop_not, sop_or
+from regal.pnr.sop import fit_exact, literal, minimize, sop_and, sop_not, \
+    sop_or
 
 _logger = logging.getLogger("regal_pnr")
 _logger.addHandler(logging.NullHandler())
@@ -29,6 +30,11 @@ def _fit(terms, depth):
     for inverted in (False, True):
         fitted = minimize(terms, inverted)
         if len(fitted) <= depth:
+            return fitted, inverted
+    # The heuristic can miss covers that fit, look for one exactly
+    for inverted in (False, True):
+        fitted = fit_exact(terms, depth, inverted)
+        if fitted is not None:
             return fitted, inverted
     return None
 

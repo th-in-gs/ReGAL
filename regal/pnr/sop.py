@@ -6,7 +6,7 @@
 # Operations return None once a SOP grows past MAX_TERMS, far more than a
 # macro cell can hold, to keep the expansion bounded.
 
-from regal.espresso import espresso
+from regal.espresso import espresso, fit
 
 MAX_TERMS = 64
 
@@ -55,10 +55,7 @@ def sop_not(sop):
     return minimize(sop, complement=True)
 
 
-def minimize(sop, complement=False):
-    # Two-level minimization of a SOP (or of its complement if asked)
-    if sop is None:
-        return None
+def _cubes(sop):
     names = sorted({name for term in sop for name, _ in term})
     cubes = []
     for term in sop:
@@ -67,10 +64,25 @@ def minimize(sop, complement=False):
             "-" if name not in polarities else "1" if polarities[name] else "0"
             for name in names
         ))
+    return names, cubes
 
-    result = []
-    for cube in espresso(len(names), cubes, complement):
-        result.append(frozenset(
-            (name, c == "1") for name, c in zip(names, cube) if c != "-"
-        ))
-    return result
+
+def _terms(names, cubes):
+    return [frozenset((name, c == "1")
+                      for name, c in zip(names, cube) if c != "-")
+            for cube in cubes]
+
+
+def minimize(sop, complement=False):
+    # Two-level minimization of a SOP (or of its complement if asked)
+    if sop is None:
+        return None
+    names, cubes = _cubes(sop)
+    return _terms(names, espresso(len(names), cubes, complement))
+
+
+def fit_exact(sop, depth, complement=False):
+    # SOP (or its complement) in at most depth terms, or None
+    names, cubes = _cubes(sop)
+    fitted = fit(len(names), cubes, depth, complement)
+    return None if fitted is None else _terms(names, fitted)

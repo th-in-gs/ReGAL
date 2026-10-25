@@ -11,8 +11,8 @@ setup(
     author="Pierre Surply",
     author_email="pierre.surply@lse.epita.fr",
     install_requires=[
-        "pyeda",
         "pyserial",
+        "python-sat",
         "pyyaml"
     ],
     python_requires=">=3.9",
