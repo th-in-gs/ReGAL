@@ -19,6 +19,7 @@ _samples_simple = [
 _samples_registered = [
     ("clk.v", "clk.jed"),
     ("clk_mixed.v", "clk_mixed.jed"),
+    ("ff.v", "ff.jed"),
 ]
 
 _samples_complex = [
