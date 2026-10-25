@@ -10,6 +10,14 @@ _logger = logging.getLogger("regal_pnr")
 _logger.addHandler(logging.NullHandler())
 
 
+def _get_param(cell, name):
+    # Recent Yosys versions write integer parameters as binary strings
+    value = cell["parameters"][name]
+    if isinstance(value, str):
+        value = int(value, 2)
+    return value
+
+
 class Cell:
     def __init__(self, gal_mode, outpad, inputs, depth=8):
         self.gal_mode = gal_mode
@@ -48,9 +56,9 @@ class Cell:
             self.fuses_and_array[idx + 1] = table[i * 2 + 1] ^ 1
 
     def _get_input_table(self, sop, index):
-        sop_table = sop["parameters"]["TABLE"]
-        sop_depth = sop["parameters"]["DEPTH"]
-        sop_width = sop["parameters"]["WIDTH"]
+        sop_table = _get_param(sop, "TABLE")
+        sop_depth = _get_param(sop, "DEPTH")
+        sop_width = _get_param(sop, "WIDTH")
 
         if sop_depth > self.get_useable_depth():
             raise PnrError(
@@ -59,9 +67,6 @@ class Cell:
                     self.outpad, sop_depth, self.get_useable_depth()
                 )
             )
-
-        if isinstance(sop_table, str):
-            sop_table = int(sop_table, 2)
 
         table = []
         for i in range(index * 2, self.depth * sop_width * 2, sop_width * 2):
@@ -136,7 +141,7 @@ class Cell:
                 driver = netlist.get_driver(driver["connections"]["A"][0])
 
             if driver["type"] == "GAL_SOP":
-                if driver["parameters"]["WIDTH"] == 1:
+                if _get_param(driver, "WIDTH") == 1:
                     upstream = driver["connections"]["I0"][0]
                     if netlist.get_netname(upstream) not in pins.keys():
                         _logger.info("Inverter SOP detected: %s", upstream)
