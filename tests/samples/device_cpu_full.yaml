@@ -1,0 +1,17 @@
+device: GAL16V8
+mode: registered
+pins:
+    Clk: 1
+    I0: 2
+    I1: 3
+    I2: 4
+    I3: 5
+    DIN: 6
+    RR: 19
+    IEN: 18
+    OEN: 17
+    SKIP: 16
+    WRITE: 15
+    DOUT: 14
+    JMP: 13
+    RTN: 12

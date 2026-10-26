@@ -3,7 +3,7 @@ import sys
 
 from datetime import datetime
 
-from regal.pnr.exception import PnrError
+from regal.pnr.exception import FitError, PnrError
 from regal.pnr.jedec import Jedec
 from regal.pnr.sop import fit_exact, literal, minimize, sop_and, sop_not, \
     sop_or
@@ -68,9 +68,9 @@ class Cell:
             terms = []
 
         if len(terms) > self.get_useable_depth():
-            raise PnrError(
-                "Pin {}: sum-of-product cannot fit in the macro-cell. "
-                "(Depth: {}, Max: {})".format(
+            raise FitError(
+                "Pin {} needs {} product terms, more than the {} a macro "
+                "cell holds".format(
                     self.outpad, len(terms), self.get_useable_depth()
                 )
             )
@@ -236,6 +236,11 @@ class Gal:
             raise ValueError("Invalid GAL mode: {}".format(mode))
 
         self._expansions = {}
+        # Product terms needed by each macro cell function, after inlining
+        # and minimization (None if too large), to explain fit failures
+        self._sizes = {}
+        # Names to show for internal signals placed on spare macro cells
+        self._display = {}
 
         self.cells = []
         for outpad in outpads:
@@ -353,6 +358,7 @@ class Gal:
         full = build({bit: expansions[bit] for bit in candidates})
         if full is not None and len(full) > depth:
             full = minimize(full)
+        self._sizes[label] = None if full is None else len(full)
         chunks = None
         if full is not None and len(placed) > len(registers):
             chunks = self._plan_split(full, depth, pins, len(registers))
@@ -365,9 +371,12 @@ class Gal:
             not fits(build(inlined))):
             placed = registers
 
-        for bit in placed:
+        for k, bit in enumerate(placed):
             netname = netlist.get_netname(bit, pins)
             if netname not in pins:
+                if netname.startswith("$"):
+                    # Name nodes created by Yosys after the cell using them
+                    self._display[netname] = "{}_node{}".format(label, k)
                 self.place_internal(netlist, bit, netname, pins)
 
         if placed is registers and chunks is not None:
@@ -396,15 +405,15 @@ class Gal:
 
     def _take_spare(self, netname, pins):
         spares = self._spare_cells(pins)
+        name = self._display.get(netname, netname)
         if not spares:
-            raise PnrError(
-                "No IO assigned for netname {} and no spare macro cell with "
-                "feedback left to place it on".format(netname)
+            raise FitError(
+                "No spare macro cell left for internal signal {}".format(name)
             )
         cell = spares[0]
         _logger.warning(
             "Internal signal %s placed on spare pin %d "
-            "(leave this pin unconnected)", netname, cell.outpad
+            "(leave this pin unconnected)", name, cell.outpad
         )
         pins[netname] = cell.outpad
         return cell
@@ -433,8 +442,34 @@ class Gal:
         cell = self._take_spare(netname, pins)
         cell.configure(netlist, bit, pins)
 
+    def _fit_error(self, netname, pin, assigned, pins, error):
+        # Explain why the macro cell of an output could not be configured
+        size = self._sizes.get(netname)
+        depth = self.get_cell(pin).get_useable_depth()
+        if netname in self._sizes and (size is None or size > depth):
+            if size is None:
+                what = "is too large to flatten into product terms"
+            else:
+                what = "needs {} product terms after minimization, more " \
+                    "than the {} a macro cell holds".format(size, depth)
+            msg = "Output {} (pin {}) {}, and no spare macro cell is left " \
+                "to split it over".format(netname, pin, what)
+        else:
+            msg = "Output {} (pin {}): {}".format(netname, pin, error.msg)
+
+        spares = sorted((p, n) for n, p in pins.items() if n not in assigned)
+        if spares:
+            msg += " (spare pins already used: {})".format(", ".join(
+                "{} for {}".format(p, self._display.get(n, n))
+                for p, n in spares))
+        else:
+            msg += " (every pin with feedback is assigned in the " \
+                "configuration)"
+        return FitError(msg)
+
     def pnr(self, netlist, pins):
         # Internal signals get added to pins as they are placed
+        assigned = set(pins)
         pins = dict(pins)
         ios = list(netlist.get_ios(pins))
 
@@ -444,7 +479,12 @@ class Gal:
         for bit in netlist.get_register_bits():
             netname = netlist.get_netname(bit, pins)
             if netname not in pins:
-                registers.append((self._take_spare(netname, pins), bit))
+                try:
+                    registers.append((self._take_spare(netname, pins), bit))
+                except FitError:
+                    raise FitError(
+                        "Register {} is not an output and no spare macro "
+                        "cell is left for it".format(netname))
 
         for netname, pin, direction in ios:
             if direction == "output":
@@ -453,7 +493,10 @@ class Gal:
                     raise PnrError("Cell {} is already used".format(pin))
 
                 bit = netlist.get_bit(netname)
-                cell.configure(netlist, bit, pins)
+                try:
+                    cell.configure(netlist, bit, pins)
+                except FitError as error:
+                    raise self._fit_error(netname, pin, assigned, pins, error)
             else:
                 try:
                     cell = self.get_cell(pin)
