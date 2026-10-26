@@ -52,6 +52,20 @@ class Netlist:
                 return name
         return None
 
+    def get_used_inputs(self):
+        # Input ports read by a cell or wired straight to an output
+        read = set()
+        for cell in self.top["cells"].values():
+            for name, bits in cell["connections"].items():
+                if cell["port_directions"][name] == "input":
+                    read.update(bits)
+        for port in self.top["ports"].values():
+            if port["direction"] == "output":
+                read.update(port["bits"])
+        return [name for name, port in self.top["ports"].items()
+                if port["direction"] == "input" and
+                any(bit in read for bit in port["bits"])]
+
     def get_register_bits(self):
         return [cell["connections"]["Q"][0]
                 for cell in self.top["cells"].values()

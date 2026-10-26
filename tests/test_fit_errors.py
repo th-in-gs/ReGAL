@@ -14,11 +14,16 @@ _samples = [
      "configuration)"),
     ("parity3.v", "device_parity3.yaml",
      "Output O1 (pin 18) needs 16 product terms after minimization, more "
-     "than the 8 a macro cell holds, and no spare macro cell is left to "
-     "split it over (spare pins already used: 12 for O0_part0, "
-     "13 for O0_part1, 14 for O1_node0)"),
+     "than the 8 a macro cell holds, and the 1 spare macro cell left is "
+     "not enough to split it over (spare pins already used: "
+     "12 for O0_part0, 13 for O0_part1)"),
     ("hidden_full.v", "device_hidden_full.yaml",
      "Register Clk2 is not an output and no spare macro cell is left for it"),
+    ("parity8.v", "device_parity8.yaml",
+     "Output O (pin 19) is too large to flatten into product terms "
+     "(more than 64)"),
+    ("parity.v", "device_missing.yaml",
+     "Input I4 is used but not assigned to a pin"),
 ]
 
 
