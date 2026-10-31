@@ -31,8 +31,8 @@ reg [3:0] sio;
 always @(*) begin
     case (k)
         1: sio = {D7, D6, D5, D4};
-        2: sio = {D3, D2, D1, D0};
-        3: sio = PEND ? 4'b1110 : {3'b001, WR_n};   // READ 0x03, WRITE 0x02
+        3: sio = {D3, D2, D1, D0};
+        2: sio = PEND ? 4'b1110 : {3'b001, WR_n};   // READ 0x03, WRITE 0x02
         default: sio = PEND ? 4'b1110 : 4'b0000;     // command, high nibble
     endcase
 end

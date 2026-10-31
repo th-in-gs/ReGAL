@@ -89,6 +89,11 @@ def sizes(e, covers=False):
 def cost(s):
     return sum(v + 100 * max(0, v - 8) for v in s.values())
 
+# Waiting state after a read: K 4, which nobody drives, as the RAM keeps
+# driving SIO for up to tDIS = 20 ns after CS rises. Waiting states only
+# have one bit set, so that leaving them only clears bits.
+FR = 8
+
 # 8052 clock after each transaction state: phases of 2 to 4 master clocks,
 # periods of at most 7 (the slow phase may follow one fast phase)
 P = [0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0]
@@ -99,7 +104,7 @@ def random_enc(rng):
     R = u[2:]
     e = dict(c1=c[0], dH=c[1], dL=c[2], A=rng.sample(range(8, 12), 4),
              dummy=u[:2], R=R, h8=rng.choice(R[:2]), h9=rng.choice(R[2:]),
-             fr=1 << rng.randrange(5), fw=1 << rng.randrange(5), P=P)
+             fr=FR, fw=1 << rng.randrange(5), P=P)
     e['hr'] = rng.choice([k for k in UNDRIVEN
                           if k not in (e['h8'], e['h9']) + tuple(e['dummy'])])
     e['hw'] = rng.choice(UNDRIVEN)
@@ -119,7 +124,7 @@ def mutate(e, rng):
         e['hr'] = rng.choice([x for x in UNDRIVEN
                               if x not in (e['h8'], e['h9']) + tuple(e['dummy'])])
     elif k == 3:
-        e['fr'] = 1 << rng.randrange(5); e['fw'] = 1 << rng.randrange(5)
+        e['fw'] = 1 << rng.randrange(5)
     elif k == 4:
         e['hw'] = rng.choice(UNDRIVEN)
     else:

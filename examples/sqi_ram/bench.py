@@ -45,7 +45,7 @@ class Ram:
         self.mem = [rng.randrange(256) for _ in range(65536)]
         self.sqi = False
         self.cs = False
-        self.drive = None
+        self.drive = self.releasing = None
         self.cs_rise_ns = -1e9
 
     def cs_change(self, low, now):
@@ -64,7 +64,9 @@ class Ram:
                     self.sqi = True
                 elif self.bits:
                     raise Fail("unexpected SPI command {}".format(self.bits))
-            self.cs, self.drive = False, None
+            # Outputs are disabled up to tDIS = 20 ns after CS rises
+            self.releasing, self.drive = self.drive, None
+            self.cs = False
             self.cs_rise_ns = now
 
     def rise(self, sio, now):
@@ -246,11 +248,13 @@ def run(cycles, seed=1):
             shift = 12 - 4 * ADDRESS_K.index(k)
             for i in range(4):
                 drivers[i].append(("244", (op["addr"] >> (shift + i)) & 1))
-        if ram.drive is not None:
-            for i in range(4):
-                drivers[i].append(("RAM", (ram.drive >> i) & 1))
+        for drive in (ram.drive, ram.releasing):
+            if drive is not None:
+                for i in range(4):
+                    drivers[i].append(("RAM", (drive >> i) & 1))
+        ram.releasing = None
         for i in range(4):
-            if len(drivers[i]) > 1 and not sig["CS_n"]:
+            if len(drivers[i]) > 1:
                 raise Fail("SIO{} driven by {} at K={}".format(
                     i, [x[0] for x in drivers[i]], k))
         bus = [x[0][1] if x else None for x in drivers]

@@ -34,8 +34,8 @@ SIO driver (`sio.yaml`, complex mode): pins 1-4 K0-K3, 5 PEND, 6 `/WR`,
 12 SIO3.
 
 74AC138: A = K0, B = K1, C = K2, G1 = K3, `/G2A` = K2, `/G2B` = ground. The
-state search placed the address nibbles at K 9, 10, 8 and 11
-(`encoding.py`), so Y1 enables A15-12, Y2 A11-8, Y0 A7-4 and Y3 A3-0.
+state search placed the address nibbles at K 8, 10, 11 and 9
+(`encoding.py`), so Y0 enables A15-12, Y2 A11-8, Y3 A7-4 and Y1 A3-0.
 
 74AC574: CLK = SCK, D0-3 = SIO0-3, D4-7 = Q0-3, Q0-7 = P0.0-7,
 `/OE` = `/RD`. Each rising SCK shifts a nibble in. The feedback goes through
@@ -54,6 +54,8 @@ two data nibbles, P0 holds the byte.
    fits.
 4. It holds `/CS` low for one more state (tCSH), then raises it.
 5. It waits until `/RD` and `/WR` are both high, then returns to idle.
+   After a read it waits at K 4, which nobody drives, because the RAM
+   keeps driving SIO for up to 20 ns (tDIS) after `/CS` rises.
 
 The datasheet's note that "the first byte read after the address will be
 a dummy byte" suggests the RAM may already drive SIO during the dummy
@@ -105,10 +107,10 @@ don't-cares.
 
 | Sequencer register | Product terms (of 8) |
 |---|---|
-| K0, CPUCLK | 6 |
-| K2 | 5 |
-| SCK, K3 | 4 |
-| K1, /CS, PEND | 3 |
+| CPUCLK | 6 |
+| SCK, K0, K3 | 5 |
+| /CS | 4 |
+| K1, K2, PEND | 3 |
 
 To rebuild:
 
@@ -125,8 +127,8 @@ python bench.py
 
 - Both GALs are simulated from their fuse maps.
 - The 23LC512 model covers SPI and SQI, sequential mode and HOLD, and
-  drives SIO from the read dummy cycles on. It checks
-  tCSS, tCSH, tCSD and SIO contention.
+  drives SIO from the read dummy cycles on and until tDIS after `/CS`
+  rises. It checks tCSS, tCSH, tCSD and SIO contention.
 - The 8052 runs random `MOVX` reads and writes, clocked from CPUCLK.
 
 The 8052's requirements are Intel's formulas, with each period taken as the
