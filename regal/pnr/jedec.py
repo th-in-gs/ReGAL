@@ -63,9 +63,9 @@ class Jedec:
         checksum &= 0xFFFF
         self.out("C{:04X} *".format(checksum))
 
-        file_checksum = 0
+        # Sum of every character from STX to ETX, both included
+        file_checksum = ord(STX) + ord(ETX)
         for c in self._content:
             file_checksum += ord(c)
-        file_checksum += 0x03
         file_checksum &= 0xFFFF
         self.stream.write(ETX + "{:04X}".format(file_checksum))
