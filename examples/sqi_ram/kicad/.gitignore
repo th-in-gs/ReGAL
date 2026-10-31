@@ -3,3 +3,6 @@ __pycache__/
 *.lck
 fp-info-cache
 *.kicad_prl
+*.dsn
+*-drc.rpt
+fab/

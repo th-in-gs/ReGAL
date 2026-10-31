@@ -251,11 +251,23 @@ def connections():
         conn[(ref, gnd)] = "GND"
         conn[(ref, vcc)] = "VCC"
 
+    # J1: header to the 8052 board, with grounds next to CPUCLK
+    for pin, net in HEADER.items():
+        conn[("J1", str(pin))] = net
+
     # Decoupling, one per chip
     for i in range(7):
         conn[("C%d" % (i + 1), "1")] = "VCC"
         conn[("C%d" % (i + 1), "2")] = "GND"
     return conn
+
+
+# J1 pin -> net
+HEADER = {1: "VCC", 2: "GND"}
+HEADER.update({3 + i: "AD%d" % i for i in range(8)})
+HEADER.update({11 + i: "A%d" % i for i in range(16)})
+HEADER.update({27: "~{RD}", 28: "~{WR}", 29: "GND", 30: "CPUCLK", 31: "GND",
+               32: "VCC"})
 
 
 # Pins left unconnected on purpose: the sequencer's spare inputs (the
@@ -283,6 +295,9 @@ PARTS = [
      "Package_DIP:DIP-8_W7.62mm", (300, 55)),
     ("X1", "Oscillator", "CXO_DIP8", "32MHz",
      "Oscillator:Oscillator_DIP-8", (220, 55)),
+    ("J1", "Connector_Generic", "Conn_02x16_Odd_Even", "8052 bus",
+     "Connector_PinHeader_2.54mm:PinHeader_2x16_P2.54mm_Vertical",
+     (380, 125)),
 ] + [
     ("R%d" % (i + 1), "Device", "R", "10k",
      "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",

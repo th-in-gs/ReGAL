@@ -1,7 +1,7 @@
 # KiCad schematic
 
 `sqi_ram.kicad_sch` is the interface as a KiCad 7 schematic, which KiCad 8
-and 9 also open. Every part has a footprint: through-hole DIP packages,
+and 9 also open, and `sqi_ram.kicad_pcb` is a board for it. Every part has a footprint: through-hole DIP packages,
 with sockets for the two GALs so they can be reprogrammed.
 
 ## Opening it
@@ -35,6 +35,56 @@ Then run Tools > Update PCB from Schematic (F8) in the PCB editor, place the
 parts and route. Keep the 32 MHz oscillator, U1, SCK and the 23LC512 close
 together, and give each chip its 100 nF capacitor right at its supply pins.
 
+## PCB
+
+`sqi_ram.kicad_pcb` is a 95 × 72 mm two-layer board, all through-hole,
+with M3 mounting holes in the corners and ground pours on both sides.
+`sqi_ram-gerbers.zip` holds the Gerbers and Excellon drill files to upload
+to a board house.
+
+| Rule | Value |
+|---|---|
+| Signal tracks | 0.25 mm |
+| VCC and GND tracks | 0.5 mm |
+| Clearance | 0.2 mm |
+| Vias | 0.7 mm (0.35 mm drill), 0.8 mm (0.4 mm drill) on supplies |
+
+Any standard two-layer service can make it.
+
+The 8052 connects through J1, a 2×16 pin header:
+
+| J1 pins | Signal |
+|---|---|
+| 1, 32 | VCC |
+| 2, 29, 31 | GND |
+| 3-10 | AD0-AD7 (P0) |
+| 11-18 | A0-A7 (address latch outputs) |
+| 19-26 | A8-A15 (P2) |
+| 27, 28 | `/RD`, `/WR` |
+| 30 | CPUCLK (to XTAL1), between two grounds |
+
+Keep the cable to the 8052 board short (10 cm or less): it carries the
+16 MHz clock and the data bus.
+
+KiCad's DRC on the board finds no violations and no unconnected pads, and
+every pad's net matches the schematic's netlist. The tracks are an
+autorouter's: they work, but you may want to tidy them in KiCad.
+
+### Rebuilding the board
+
+```console
+python make_pcb.py place     # unrouted board and sqi_ram.dsn
+FREEROUTING_JAR=freerouting.jar python make_pcb.py route
+python make_pcb.py import    # tracks from sqi_ram.ses, ground pours, DRC
+```
+
+`route` runs [Freerouting](https://freerouting.app) (2.5 needs Java 25) with
+automatic neck-down off, so that every track keeps its net class width.
+`import` reads Freerouting's session file and adds the ground pours. Where
+the tracks leave room for only one thermal spoke, it connects the pad to
+the pour solidly. `sqi_ram.ses` is committed, so `import` alone rebuilds
+this board.
+
 ## Parts
 
 | Ref | Part | Notes |
@@ -47,6 +97,7 @@ together, and give each chip its 100 nF capacitor right at its supply pins.
 | U7 | 23LC512-I/P | 64 KB SPI/SQI SRAM, DIP-8 |
 | X1 | 32 MHz oscillator, DIP-8 can, 5 V | |
 | R1-R4 | 10 kΩ | SIO pull-ups |
+| J1 | 2×16 pin header, 2.54 mm | To the 8052 board |
 | C1-C7 | 100 nF | Decoupling |
 
 GAL16V8s from Lattice are no longer made. The Microchip (Atmel) ATF16V8B is
