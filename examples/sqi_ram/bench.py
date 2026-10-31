@@ -21,9 +21,9 @@ sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from galsim import Gal16v8Sim  # noqa: E402
 
-from encoding import ADDRESS_K  # noqa: E402
+from encoding import ADDRESS_K, MASTER_MHZ  # noqa: E402
 
-MASTER_NS = 1e3 / 27.75
+MASTER_NS = 1e3 / MASTER_MHZ
 GAL_TCO = 7          # GAL16V8-10 clock to output
 AC574_TCO = 9        # 74AC574 clock to output
 RAM_TCSS, RAM_TCSH, RAM_TCSD = 25, 50, 25
@@ -183,7 +183,9 @@ class Cpu:
             self.gap = self.rng.randrange(12, 40)
 
 
-def run(cycles, seed=1):
+def run(cycles, seed=1, late=False):
+    # late: the GALs see /RD and /WR one master clock later than the 8052
+    # drives them, as if the 8052 were slow to drive them
     rng = random.Random(seed)
     seq = Gal16v8Sim(os.path.join(HERE, "seq.jed"))
     sio = Gal16v8Sim(os.path.join(HERE, "sio.jed"))
@@ -198,11 +200,14 @@ def run(cycles, seed=1):
     prev = dict(seq.outputs({}))
     bus = [1, 1, 1, 1]
     last_ck_edge, ck_level = 0.0, 1
+    late_rd = late_wr = True
     cs_fall = None
 
     for n in range(cycles):
         now = n * MASTER_NS
-        values = {SEQ_PINS["RD_n"]: int(cpu.rd), SEQ_PINS["WR_n"]: int(cpu.wr)}
+        rd, wr = (late_rd, late_wr) if late else (cpu.rd, cpu.wr)
+        late_rd, late_wr = cpu.rd, cpu.wr
+        values = {SEQ_PINS["RD_n"]: int(rd), SEQ_PINS["WR_n"]: int(wr)}
         seq.clock(values)
         out = seq.outputs(values)
         sig = {name: out[pin] for name, pin in SEQ_PINS.items()
@@ -235,7 +240,7 @@ def run(cycles, seed=1):
         d = op["data"] if op["write"] else rng.randrange(256)
         sin = {SIO_PINS["K%d" % i]: (k >> i) & 1 for i in range(4)}
         sin[SIO_PINS["PEND"]] = sig["PEND"]
-        sin[SIO_PINS["WR_n"]] = int(cpu.wr)
+        sin[SIO_PINS["WR_n"]] = int(wr)
         for i in range(8):
             sin[SIO_PINS["D%d" % i]] = (d >> i) & 1
         sout = sio.outputs(sin)
@@ -286,3 +291,4 @@ if __name__ == "__main__":
     cycles = int(sys.argv[1]) if len(sys.argv) > 1 else 200000
     for seed in (1, 2, 3):
         print(run(cycles, seed))
+    print("/RD and /WR seen one master clock late:", run(cycles, 4, True))

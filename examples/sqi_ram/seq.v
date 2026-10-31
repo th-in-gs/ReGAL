@@ -12,7 +12,7 @@
 //            (K 4 and 7) on
 //
 // States (t) visited while CS_n is low:
-//   read:  0, 1, 4, 5, 16, 17, 20, 21, 22, 23, 18, 19, 8, 9, 14, 15, 28, 12, 13, 10, 24, 25, 31
+//   read:  0, 1, 4, 5, 16, 17, 20, 21, 22, 23, 18, 19, 8, 9, 14, 15, 28, 12, 13, 10, 24, 25, 31, 27, 29
 //   write: 0, 1, 4, 5, 16, 17, 20, 21, 22, 23, 18, 19, 2, 3, 6, 7, 31
 // then CS_n rises and t moves to 8 (read) or 2 (write) until /RD and
 // /WR are both high again, and then to 0 (idle). These waiting states only
@@ -53,24 +53,29 @@ module top (
     output reg PEND
 );
 
-// 5 product terms
+// 6 product terms
 wire SCK_next = ((!SCK & !K2 & !CS_n)
     | (!SCK & K1 & !K3)
     | (!K1 & K2 & K3)
     | (K0 & K1 & !K3 & !WR_n)
+    | (K0 & K2 & K3 & !RD_n)
     | (!SCK & !K0 & !K3 & !CS_n));
 
-// 5 product terms
+// 7 product terms
 wire K0_next = ((K0 & !WR_n)
     | (!SCK & K0 & K3)
-    | (SCK & !K0 & K2)
     | (!SCK & K0 & K1)
-    | (SCK & K1 & !K2 & K3));
+    | (K0 & K1 & K3 & !RD_n)
+    | (SCK & !K0 & K2 & !K3)
+    | (SCK & K1 & !K2 & K3)
+    | (SCK & !K0 & !K1 & K2));
 
-// 3 product terms
-wire K1_next = !((!SCK & !K1)
-    | (SCK & K0 & K3)
-    | (SCK & !K0 & K1 & !K3));
+// 5 product terms
+wire K1_next = ((!SCK & K1)
+    | (SCK & !K1 & !K3)
+    | (K0 & K1 & !K3)
+    | (SCK & !K1 & K2)
+    | (SCK & !K0 & !K2 & K3));
 
 // 3 product terms
 wire K2_next = ((K2 & !RD_n)
@@ -81,27 +86,29 @@ wire K2_next = ((K2 & !RD_n)
 wire K3_next = ((!SCK & !K2 & K3)
     | (!K0 & !K1 & K3)
     | (SCK & K1 & !K2)
-    | (SCK & K0 & !K3 & WR_n)
-    | (K0 & !K1 & !K3 & !CS_n & WR_n));
+    | (K0 & !K1 & K2)
+    | (SCK & K0 & K2 & !RD_n));
 
-// 4 product terms
+// 5 product terms
 wire CS_n_next = ((RD_n & WR_n)
+    | (K2 & RD_n)
     | (K2 & CS_n)
     | (K0 & CS_n)
-    | (K0 & K2 & K3));
+    | (SCK & !K0 & K1 & K2 & K3));
 
 // 3 product terms
 wire PEND_next = !((!PEND)
     | (K2 & !CS_n & !WR_n)
-    | (K0 & K2 & K3 & !RD_n));
+    | (SCK & !K0 & K1 & K2 & K3));
 
-// 6 product terms
-wire CPUCLK_next = ((CS_n & !CPUCLK)
-    | (!K0 & K1 & !K3)
-    | (!K0 & K1 & K2)
-    | (SCK & K0 & K3 & !WR_n)
-    | (SCK & K0 & !K2 & WR_n)
-    | (!SCK & !K1 & !K2 & K3));
+// 7 product terms
+wire CPUCLK_next = !((CS_n & CPUCLK)
+    | (!SCK & K0 & K3)
+    | (!K0 & K1 & K2 & !K3)
+    | (K0 & K1 & !K2 & K3)
+    | (!K0 & !K1 & !K3 & !CS_n & !WR_n)
+    | (!K1 & !K2 & !K3 & !CS_n & WR_n)
+    | (K0 & !K1 & !K3 & !CS_n & WR_n));
 
 always @(posedge MCLK) begin
     SCK <= SCK_next;

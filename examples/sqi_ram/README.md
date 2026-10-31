@@ -3,9 +3,11 @@
 Two GAL16V8s let an 8052 use a Microchip 23LC512 (64 KB serial SRAM, SQI
 mode) as ordinary external data memory: `MOVX` reads and writes work
 unchanged. The 8052 has no wait-state input, so the sequencer GAL generates
-the 8052's clock and slows it to about 4 MHz while a transfer runs, which
-stretches `/RD` and `/WR`. It never stops the clock, so the 8052 does not
-need to be fully static. It must accept clocks down to 3.5 MHz.
+the 8052's clock: 16 MHz normally, slowed to about 3.6 MHz while a
+transfer runs, which stretches `/RD` and `/WR`. It never stops the clock,
+so the 8052 does not need to be fully static. It must accept clocks down
+to 3.5 MHz. SCK runs at 16 MHz, within the RAM's limit for both its
+industrial (20 MHz) and extended (16 MHz) temperature grades.
 
 This is a design study. It has been simulated, not built.
 
@@ -19,7 +21,7 @@ This is a design study. It has been simulated, not built.
 | 2 × 74AC244 | Address nibbles onto SIO: A15-8 from P2, A7-0 from the latch |
 | 74AC574 | Collects the two read nibbles and drives P0 while /RD is low |
 | 74HC573 | The usual 8052 address latch |
-| 27.75 MHz oscillator | Master clock: the 8052 runs at 13.875 MHz between transfers |
+| 32 MHz oscillator | Master clock: the 8052 and SCK run at 16 MHz |
 | 4 × 10 kΩ | Pull-ups on SIO0-3 |
 
 ## Connections
@@ -52,7 +54,9 @@ two data nibbles, P0 holds the byte.
    SIO for the two dummy cycles and then clocks in two data nibbles. Each
    read nibble gets two low SCK states, so the RAM's 25 ns output delay
    fits.
-4. It holds `/CS` low for one more state (tCSH), then raises it.
+4. It holds `/CS` low with SCK high for one more state after a write, and
+   three after a read, then raises it. One is enough for tCSH. The other
+   two keep the 8052's clock slow until it has sampled the data.
 5. It waits until `/RD` and `/WR` are both high, then returns to idle.
    After a read it waits at K 4, which nobody drives, because the RAM
    keeps driving SIO for up to 20 ns (tDIS) after `/CS` rises.
@@ -61,8 +65,16 @@ The datasheet's note that "the first byte read after the address will be
 a dummy byte" suggests the RAM may already drive SIO during the dummy
 cycles, so nothing else drives them then.
 
-SCK runs at 13.875 MHz. A read keeps `/CS` low for 23 master clocks
-(0.83 µs) and a write for 17 (0.61 µs).
+Each state is one master clock (31.25 ns). A read keeps `/CS` low for 25
+states (0.78 µs) and a write for 17 (0.53 µs).
+
+### Why not 20 MHz
+
+SCK is a register that toggles every master clock, and so is the 8052's
+clock between transfers. 20 MHz SCK would need a 40 MHz master clock and
+the 8052 at a third of it (13.3 MHz). That needs another register, and
+all eight are in use. 32 MHz runs the 8052 at its rated 16 MHz with SCK
+at 16 MHz, and the read margin comes from slowing the 8052 anyway.
 
 ### Switching the RAM to SQI mode
 
@@ -97,9 +109,9 @@ states as don't-cares:
 - the states for the dummy cycles, read data and CS hold
 - the waiting states
 
-The 8052 clock pattern is fixed: 2-3-4-3-4... master clocks per phase,
-the longest pattern that keeps every period within 7 master clocks (the
-first slow phase can follow a fast one).
+The 8052 clock pattern is fixed: 2-6-3-6-3... master clocks per phase,
+the slowest pattern that keeps every period within 9 master clocks
+(281 ns, 3.56 MHz). The first slow phase can follow a fast one.
 
 The search found assignments where every register fits. `gen/gen.py` writes the
 minimized next-state equations into `seq.v`, because Yosys cannot use
@@ -107,10 +119,10 @@ don't-cares.
 
 | Sequencer register | Product terms (of 8) |
 |---|---|
-| CPUCLK | 6 |
-| SCK, K0, K3 | 5 |
-| /CS | 4 |
-| K1, K2, PEND | 3 |
+| K0, CPUCLK | 7 |
+| SCK | 6 |
+| K1, K3, /CS | 5 |
+| K2, PEND | 3 |
 
 To rebuild:
 
@@ -139,21 +151,23 @@ actual, stretched one:
 
 The timing assumes GAL16V8-10 (7 ns clock to output) and a 74AC574 (9 ns).
 
-Results over 3 × 100,000 master clocks (about 3,600 transfers):
+Results over 3 × 100,000 master clocks (about 3,550 transfers):
 
 - Every byte read back is correct.
 - There is no SIO contention.
 - The first write switches the RAM to SQI mode.
-- The 8052's clock periods stay between 72 and 252 ns.
-- The worst read margin is 6 ns and the worst write margin is 200 ns.
+- The 8052's clock periods stay between 62.5 and 281 ns.
+- The worst read margin is 76 ns and the worst write margin is 215 ns.
+
+A fourth run has the GALs see `/RD` and `/WR` one master clock late, as
+if the 8052 were slow to drive them. It still passes: read margin 14 ns,
+write margin 152 ns.
 
 ## Limitations
 
-- **The read margin is small.** It assumes the sequencer sees `/RD` on the
-  first master clock edge after the 8052 drives it, that is within about
-  20 ns after the XTAL1 edge. If the 8052 is slower, a read loses a master
-  clock (36 ns) and misses Intel's limit. If your 8052 accepts slower
-  clocks, longer slow phases restore the margin.
+- **The 8052 runs at its maximum rated clock**, 16 MHz, between
+  transfers. Baud rates change with the crystal: 16 MHz is not a
+  standard UART frequency.
 - **The address buffers need AC or ACT logic.** The '138 to '244 enable
   path must settle within one master clock before SCK rises. HC parts are
   too slow.

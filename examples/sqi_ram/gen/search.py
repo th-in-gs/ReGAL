@@ -19,7 +19,11 @@ def paths(e):
     for d in (e['dH'], e['dL']):
         write += [(d,0),(d,1)]
     l1,l2,l3,l4 = e['R']
-    read += [(l1,0),(l2,0),(e['h8'],1),(l3,0),(l4,0),(e['h9'],1),(e['hr'],1)]
+    read += [(l1,0),(l2,0),(e['h8'],1),(l3,0),(l4,0),(e['h9'],1)]
+    # CS hold: one or more states with SCK high, which also keep the 8052
+    # clock slow until it has sampled the data
+    hr = e['hr'] if isinstance(e['hr'], list) else [e['hr']]
+    read += [(k,1) for k in hr]
     write += [(e['hw'],1)]
     t = lambda s: [2*k+b for k,b in s]
     return t(read), t(write)
@@ -94,9 +98,16 @@ def cost(s):
 # have one bit set, so that leaving them only clears bits.
 FR = 8
 
-# 8052 clock after each transaction state: phases of 2 to 4 master clocks,
-# periods of at most 7 (the slow phase may follow one fast phase)
-P = [0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0]
+# 8052 clock after each transfer state, for a 32 MHz master clock: phases
+# of 2, 6, 3, 6, 3... master clocks, so that no period is longer than 9
+# (281 ns, above the 8052's 3.5 MHz minimum), the first slow phase
+# following at most one fast one
+P = [0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+     1, 1, 1, 1, 1]
+
+# Read CS hold: three states with SCK high, which keep the 8052 clock slow
+# until it has sampled the data
+HOLD_STATES = 3
 
 def random_enc(rng):
     c = rng.sample([1, 2, 3], 3)
@@ -105,9 +116,11 @@ def random_enc(rng):
     e = dict(c1=c[0], dH=c[1], dL=c[2], A=rng.sample(range(8, 12), 4),
              dummy=u[:2], R=R, h8=rng.choice(R[:2]), h9=rng.choice(R[2:]),
              fr=FR, fw=1 << rng.randrange(5), P=P)
-    e['hr'] = rng.choice([k for k in UNDRIVEN
-                          if k not in (e['h8'], e['h9']) + tuple(e['dummy'])])
+    e['hr'] = rng.sample([k for k in UNDRIVEN
+                          if k not in (e['h8'], e['h9']) + tuple(e['dummy'])],
+                         HOLD_STATES)
     e['hw'] = rng.choice(UNDRIVEN)
+    e['master_mhz'] = 32
     return e
 
 def mutate(e, rng):
@@ -121,15 +134,17 @@ def mutate(e, rng):
         u = rng.sample(UNDRIVEN, 6)
         e['dummy'], e['R'] = u[:2], u[2:]
         e['h8'] = rng.choice(e['R'][:2]); e['h9'] = rng.choice(e['R'][2:])
-        e['hr'] = rng.choice([x for x in UNDRIVEN
-                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])])
+        e['hr'] = rng.sample([x for x in UNDRIVEN
+                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])],
+                             HOLD_STATES)
     elif k == 3:
         e['fw'] = 1 << rng.randrange(5)
     elif k == 4:
         e['hw'] = rng.choice(UNDRIVEN)
     else:
-        e['hr'] = rng.choice([x for x in UNDRIVEN
-                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])])
+        e['hr'] = rng.sample([x for x in UNDRIVEN
+                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])],
+                             HOLD_STATES)
     return e
 
 if __name__ == '__main__':

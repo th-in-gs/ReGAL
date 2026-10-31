@@ -45,7 +45,9 @@ def emit(e, outdir):
     open(outdir + '/encoding.py', 'w').write(
         '# Nibble numbers (K) of A15-12, A11-8, A7-4 and A3-0: the 74AC138\n'
         '# output enabled for each K must enable that nibble\'s 74AC244 half\n'
-        'ADDRESS_K = {}\n'.format(e['A']))
+        'ADDRESS_K = {}\n\n'
+        '# Master clock: the 8052 and SCK run at half this between transfers\n'
+        'MASTER_MHZ = {}\n'.format(e['A'], e.get('master_mhz', 27.75)))
 
 if __name__ == '__main__':
     e = json.load(open(sys.argv[1]))
