@@ -1,0 +1,7 @@
+device: GAL16V8
+mode: complex
+pins:
+    A: 2
+    E1: 4
+    E2: 5
+    Y: 19

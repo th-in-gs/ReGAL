@@ -39,6 +39,7 @@ class Cell:
             self.fuse_ac1 = 0
 
         self.used = False
+        self.tristate = False
 
     def _write_terms(self, terms, pins):
         if frozenset() in terms:
@@ -57,24 +58,59 @@ class Cell:
             )
 
         for i, term in enumerate(terms):
-            row = (i + int(self.has_oe())) * self.width
-            for netname, polarity in sorted(term):
-                _logger.info("Connecting input %s%s to macro cell %d",
-                             "" if polarity else "~", netname, self.outpad)
-                try:
-                    inpad = pins[netname]
-                except KeyError:
-                    raise PnrError(
-                        "No IO assigned for netname {}".format(netname))
+            self._write_row(i + int(self.has_oe()), term, pins)
 
-                try:
-                    index_input = self.inputs.index(inpad)
-                except ValueError:
-                    raise PnrError(
-                        "Pad {} cannot be assigned as input".format(inpad))
+    def _write_row(self, row, term, pins):
+        row *= self.width
+        for netname, polarity in sorted(term):
+            _logger.info("Connecting input %s%s to macro cell %d",
+                         "" if polarity else "~", netname, self.outpad)
+            try:
+                inpad = pins[netname]
+            except KeyError:
+                raise PnrError(
+                    "No IO assigned for netname {}".format(netname))
 
-                self.fuses_and_array[row + index_input * 2 +
-                                     int(not polarity)] = 0
+            try:
+                index_input = self.inputs.index(inpad)
+            except ValueError:
+                raise PnrError(
+                    "Pad {} cannot be assigned as input".format(inpad))
+
+            self.fuses_and_array[row + index_input * 2 +
+                                 int(not polarity)] = 0
+
+    def configure_oe(self, netlist, bit, pins):
+        # The output enable of a macro cell is its first product term
+        _logger.info("Configuring output enable of macro cell %s",
+                     self.outpad)
+        if not self.has_oe():
+            raise PnrError("Pin {} cannot be tri-stated in {} mode".format(
+                self.outpad, self.gal_mode))
+        self.tristate = True
+
+        if bit == "1":
+            return
+        if bit == "0":
+            terms = []
+        else:
+            terms = self.gal.expand(netlist, bit, pins)
+            if terms is None:
+                raise FitError("Output enable of pin {} is too large to "
+                               "flatten into product terms".format(
+                                   self.outpad))
+            terms = minimize(terms)
+        if len(terms) > 1:
+            raise FitError(
+                "Output enable of pin {} needs {} product terms, but a "
+                "macro cell has only one for it".format(
+                    self.outpad, len(terms)))
+
+        if not terms:
+            # Every input and its complement: never enabled
+            self.fuses_and_array[:self.width] = [0] * self.width
+        else:
+            self._write_row(0, terms[0], pins)
 
     def configure_and_array(self, netlist, sop, pins):
         _logger.info("Configuring AND-array for macro cell {}".format(self.outpad))
@@ -163,6 +199,16 @@ class Cell:
                 self.set_registered(clock, pins)
                 bit = driver["connections"]["D"][0]
                 driver, source = self._follow(netlist, bit, pins)
+
+            if driver is not None and driver["type"] == "GAL_TRI":
+                self.configure_oe(netlist, driver["connections"]["OE"][0],
+                                  pins)
+                bit = driver["connections"]["A"][0]
+                driver, source = self._follow(netlist, bit, pins)
+                if driver is not None and driver["type"] == "GAL_DFF":
+                    raise PnrError(
+                        "Registered pin {} can only be enabled by pin "
+                        "11".format(self.outpad))
 
             if driver is not None and driver["type"] == "GAL_XOR":
                 self.invert()

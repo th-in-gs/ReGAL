@@ -122,6 +122,13 @@ pins of these macro cells are driven, so they must be left unconnected:
 [WARN ][regal_pnr] Internal signal RR_part0 placed on spare pin 12 (leave this pin unconnected)
 ```
 
+### Tri-state outputs
+
+In complex mode, and for combinational outputs in registered mode, an output
+can be tri-stated with `assign Y = OE ? A : 1'bz;`. The output enable gets a
+single product term of its own, so `OE` must be an AND of inputs and their
+complements.
+
 ### Supported devices
 
 - GAL16V8 (simple, complex and registered mode)
