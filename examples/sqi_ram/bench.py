@@ -28,11 +28,11 @@ GAL_TCO = 7          # GAL16V8-10 clock to output
 AC574_TCO = 9        # 74AC574 clock to output
 RAM_TCSS, RAM_TCSH, RAM_TCSD = 25, 50, 25
 
-SEQ_PINS = dict(RD_n=2, WR_n=3, RST=4, SCK=19, K0=18, K1=17, K2=16, K3=15,
+SEQ_PINS = dict(RD_n=2, WR_n=3, SCK=19, K0=18, K1=17, K2=16, K3=15,
                 CS_n=14, CPUCLK=13, PEND=12)
-SIO_PINS = dict(K0=1, K1=2, K2=3, K3=4, PEND=5, D0=6, D1=7, D2=8, D3=9,
-                D4=11, D5=13, D6=14, D7=15, SIO0=19, SIO1=18, SIO2=17,
-                SIO3=12)
+SIO_PINS = dict(K0=1, K1=2, K2=3, K3=4, PEND=5, WR_n=6, D0=7, D1=8, D2=9,
+                D3=11, D4=13, D5=14, D6=15, D7=16, SIO0=19, SIO1=18,
+                SIO2=17, SIO3=12)
 
 
 class Fail(Exception):
@@ -101,10 +101,14 @@ class Ram:
                 self.writes.append((self.addr, self.mem[self.addr]))
                 self.addr = (self.addr + 1) & 0xffff
 
-    def fall(self):
-        if not self.cs or not self.sqi or self.cmd != 3 or self.clocks < 8:
+    def fall(self, rng):
+        # Reads: the RAM is assumed to drive SIO from the dummy byte on
+        if not self.cs or not self.sqi or self.cmd != 3 or self.clocks < 6:
             return
         k = self.clocks - 8
+        if k < 0:
+            self.drive = rng.randrange(16)
+            return
         byte = self.mem[(self.addr + k // 2) & 0xffff]
         self.drive = (byte >> 4, byte & 15)[k % 2]
 
@@ -134,6 +138,9 @@ class Cpu:
                 write = self.rng.random() < 0.5
                 addr = self.rng.randrange(65536)
                 data = self.rng.randrange(256)
+                if not self.ram.sqi:
+                    # First transfer: EQIO, sent as a write of 0x88 to 0x9998
+                    write, addr, data = True, 0x9998, 0x88
                 self.op = dict(write=write, addr=addr, data=data,
                                start=len(self.edges) - 1)
                 if write:
@@ -156,7 +163,10 @@ class Cpu:
                     self.op["addr"], self.p0, self.model[self.op["addr"]]))
         if n == 6:
             self.rd = self.wr = True
-        if self.op["write"] and n == 7:
+        if self.op["write"] and n == 7 and self.done == 0:
+            if not self.ram.sqi or self.ram.writes:
+                raise Fail("the first write did not send EQIO")
+        elif self.op["write"] and n == 7:
             # P0 data held until 7T - 150 after /WR falls
             held = now - 150
             if self.ram.writes != [(self.op["addr"], self.op["data"])]:
@@ -190,12 +200,11 @@ def run(cycles, seed=1):
 
     for n in range(cycles):
         now = n * MASTER_NS
-        values = {SEQ_PINS["RD_n"]: int(cpu.rd), SEQ_PINS["WR_n"]: int(cpu.wr),
-                  SEQ_PINS["RST"]: int(cpu.rst)}
+        values = {SEQ_PINS["RD_n"]: int(cpu.rd), SEQ_PINS["WR_n"]: int(cpu.wr)}
         seq.clock(values)
         out = seq.outputs(values)
         sig = {name: out[pin] for name, pin in SEQ_PINS.items()
-               if name not in ("RD_n", "WR_n", "RST")}
+               if name not in ("RD_n", "WR_n")}
         tq = now + GAL_TCO
 
         # SCK and CS edges, sampling the bus as it was before this edge
@@ -214,7 +223,7 @@ def run(cycles, seed=1):
             cpu.p0 = capture
             cpu.p0_valid_ns = tq + AC574_TCO
         elif not sig["SCK"] and prev[SEQ_PINS["SCK"]]:
-            ram.fall()
+            ram.fall(rng)
         if cpu.rd:
             cpu.p0_valid_ns = None
 
@@ -224,6 +233,7 @@ def run(cycles, seed=1):
         d = op["data"] if op["write"] else rng.randrange(256)
         sin = {SIO_PINS["K%d" % i]: (k >> i) & 1 for i in range(4)}
         sin[SIO_PINS["PEND"]] = sig["PEND"]
+        sin[SIO_PINS["WR_n"]] = int(cpu.wr)
         for i in range(8):
             sin[SIO_PINS["D%d" % i]] = (d >> i) & 1
         sout = sio.outputs(sin)
@@ -232,13 +242,10 @@ def run(cycles, seed=1):
             v = sout[SIO_PINS["SIO%d" % i]]
             if v is not None:
                 drivers[i].append(("SIO GAL", v))
-        if k in ADDRESS_K and not sig["PEND"]:
+        if k in ADDRESS_K:
             shift = 12 - 4 * ADDRESS_K.index(k)
             for i in range(4):
                 drivers[i].append(("244", (op["addr"] >> (shift + i)) & 1))
-        elif k in ADDRESS_K:
-            for i in range(4):
-                drivers[i].append(("244", rng.randrange(2)))
         if ram.drive is not None:
             for i in range(4):
                 drivers[i].append(("RAM", (ram.drive >> i) & 1))

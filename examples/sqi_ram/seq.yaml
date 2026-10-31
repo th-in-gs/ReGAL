@@ -4,7 +4,6 @@ pins:
     MCLK: 1
     RD_n: 2
     WR_n: 3
-    RST: 4
 
     SCK: 19
     K0: 18

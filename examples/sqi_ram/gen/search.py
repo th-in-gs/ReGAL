@@ -2,64 +2,56 @@ import functools, itertools, json, os, random, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
 from regal.espresso import _Cover
 
-VARS = ['t0','t1','t2','t3','t4','CS_n','PEND','RD_n','WR_n','RST','CPUCLK']
+VARS = ['t0','t1','t2','t3','t4','CS_n','PEND','RD_n','WR_n','CPUCLK']
 N = len(VARS)
 SP = _Cover(N)
 
+# K values nobody drives: the SIO GAL drives K 0-3, the address buffers 8-11
+UNDRIVEN = [4, 5, 6, 7, 12, 13, 14, 15]
+
 def paths(e):
-    read = [(0,0),(0,1),(e['c1R'],0),(e['c1R'],1)]
-    write = [(0,0),(0,1),(e['c1W'],0),(e['c1W'],1)]
+    read = [(0,0),(0,1),(e['c1'],0),(e['c1'],1)]
+    write = [(0,0),(0,1),(e['c1'],0),(e['c1'],1)]
     for a in e['A']:
         read += [(a,0),(a,1)]; write += [(a,0),(a,1)]
+    for d in e['dummy']:
+        read += [(d,0),(d,1)]
     for d in (e['dH'], e['dL']):
-        read += [(d,0),(d,1)]; write += [(d,0),(d,1)]
+        write += [(d,0),(d,1)]
     l1,l2,l3,l4 = e['R']
     read += [(l1,0),(l2,0),(e['h8'],1),(l3,0),(l4,0),(e['h9'],1),(e['hr'],1)]
     write += [(e['hw'],1)]
-    init = []
-    for k in e['init']:
-        init += [(k,0),(k,1)]
-    init += [(e['ih'],1)]
     t = lambda s: [2*k+b for k,b in s]
-    return t(read), t(write), t(init)
+    return t(read), t(write)
 
 def valid(e):
-    r, w, i = paths(e)
-    return len(set(r)) == len(r) and len(set(w)) == len(w) and len(set(i)) == len(i)
+    r, w = paths(e)
+    return len(set(r)) == len(r) and len(set(w)) == len(w)
 
 def build(e):
-    read, write, init = paths(e)
+    read, write = paths(e)
     P = e['P']
-    fr, fw, fi = e['fr'], e['fw'], e['fi']
+    fr, fw = e['fr'], e['fw']
     rows = {}
     for v in itertools.product([0,1], repeat=N):
         t = sum(v[i] << i for i in range(5))
-        cs, pend, rd, wr, rst, ck = v[5:]
+        cs, pend, rd, wr, ck = v[5:]
         m = None
         if cs:
-            if pend:
-                if t in (0, 31) and rd and wr:
-                    m = dict(t=0, cs=0 if (t == 0 and not rst) else 1, pend=1, ck=1-ck)
-            else:
-                if t in {0, fr, fw, fi}:
-                    nt = 0
-                    if t == fr and t and not rd: nt = t
-                    if t == fw and t and not wr: nt = t
-                    start = t == 0 and (not rd or not wr)
-                    m = dict(t=nt, cs=0 if start else 1, pend=0, ck=1-ck)
-        elif pend:
-            if t in init and rd and wr:
-                j = init.index(t)
-                if j + 1 < len(init):
-                    m = dict(t=init[j+1], cs=0, pend=1, ck=1-ck)
-                else:
-                    m = dict(t=fi, cs=1, pend=0, ck=1-ck)
+            # Idle (t = 0), waiting for the end of the bus cycle, or power-up
+            # (t = 31, PEND set)
+            if t in {0, fr, fw} or (t == 31 and pend and rd and wr):
+                nt = 0
+                if t == fr and t and not rd: nt |= fr
+                if t == fw and t and not wr: nt |= fw
+                start = t == 0 and (not rd or not wr)
+                m = dict(t=nt, cs=0 if start else 1, pend=pend, ck=1-ck)
         elif rd != wr:
             s = read if wr else write
             if t in s:
                 j = s.index(t)
                 if j + 1 < len(s):
-                    m = dict(t=s[j+1], cs=0, pend=0, ck=P[j])
+                    m = dict(t=s[j+1], cs=0, pend=pend, ck=P[j])
                 else:
                     m = dict(t=fr if wr else fw, cs=1, pend=0, ck=P[j])
         rows[v] = m
@@ -97,55 +89,42 @@ def sizes(e, covers=False):
 def cost(s):
     return sum(v + 100 * max(0, v - 8) for v in s.values())
 
-PATTERNS = {
-    '3333': [(i // 3) % 2 for i in range(23)],
-    '3434': [0,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0],
-    '4343': [0,0,0,0,1,1,1,0,0,0,0,1,1,1,0,0,0,0,1,1,1,0,0],
-}
+# 8052 clock after each transaction state: phases of 2 to 4 master clocks,
+# periods of at most 7 (the slow phase may follow one fast phase)
+P = [0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0]
 
 def random_enc(rng):
-    d = rng.sample(range(1, 8), 4)
-    R = rng.sample(range(12, 16), 4)
-    e = dict(c1R=d[0], c1W=d[1], dH=d[2], dL=d[3], A=rng.sample(range(8, 12), 4),
-             R=R, h8=rng.choice(R[:2]), h9=rng.choice(R[2:]),
-             init=[0] + rng.sample(range(1, 8), 7), ih=rng.randrange(8, 16),
-             fr=1 << rng.randrange(5), fw=1 << rng.randrange(5),
-             fi=rng.choice([0, 1, 2, 4, 8, 16]), Pn=rng.choice(list(PATTERNS)))
-    e['hr'] = rng.choice([k for k in R if k not in (e['h8'], e['h9'])])
-    e['hw'] = rng.randrange(16)
-    e['P'] = PATTERNS[e['Pn']]
+    c = rng.sample([1, 2, 3], 3)
+    u = rng.sample(UNDRIVEN, 6)
+    R = u[2:]
+    e = dict(c1=c[0], dH=c[1], dL=c[2], A=rng.sample(range(8, 12), 4),
+             dummy=u[:2], R=R, h8=rng.choice(R[:2]), h9=rng.choice(R[2:]),
+             fr=1 << rng.randrange(5), fw=1 << rng.randrange(5), P=P)
+    e['hr'] = rng.choice([k for k in UNDRIVEN
+                          if k not in (e['h8'], e['h9']) + tuple(e['dummy'])])
+    e['hw'] = rng.choice(UNDRIVEN)
     return e
 
 def mutate(e, rng):
     e = json.loads(json.dumps(e))
-    k = rng.randrange(9)
+    k = rng.randrange(6)
     if k == 0:
-        keys = ['c1R', 'c1W', 'dH', 'dL']
-        a = rng.choice(keys)
-        used = {e[x] for x in keys}
-        free = [x for x in range(1, 8) if x not in used]
-        if free and rng.random() < 0.5:
-            e[a] = rng.choice(free)
-        else:
-            b = rng.choice(keys); e[a], e[b] = e[b], e[a]
+        a, b = rng.sample(['c1', 'dH', 'dL'], 2); e[a], e[b] = e[b], e[a]
     elif k == 1:
         i, j = rng.sample(range(4), 2); e['A'][i], e['A'][j] = e['A'][j], e['A'][i]
     elif k == 2:
-        R = rng.sample(range(12, 16), 4); e['R'] = R
-        e['h8'] = rng.choice(R[:2]); e['h9'] = rng.choice(R[2:])
-        e['hr'] = rng.choice([x for x in R if x not in (e['h8'], e['h9'])])
+        u = rng.sample(UNDRIVEN, 6)
+        e['dummy'], e['R'] = u[:2], u[2:]
+        e['h8'] = rng.choice(e['R'][:2]); e['h9'] = rng.choice(e['R'][2:])
+        e['hr'] = rng.choice([x for x in UNDRIVEN
+                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])])
     elif k == 3:
-        i, j = rng.sample(range(1, 8), 2); e['init'][i], e['init'][j] = e['init'][j], e['init'][i]
-    elif k == 4:
-        e['ih'] = rng.randrange(8, 16)
-    elif k == 5:
         e['fr'] = 1 << rng.randrange(5); e['fw'] = 1 << rng.randrange(5)
-    elif k == 6:
-        e['fi'] = rng.choice([0, 1, 2, 4, 8, 16])
-    elif k == 7:
-        e['hw'] = rng.randrange(16)
+    elif k == 4:
+        e['hw'] = rng.choice(UNDRIVEN)
     else:
-        e['Pn'] = rng.choice(list(PATTERNS)); e['P'] = PATTERNS[e['Pn']]
+        e['hr'] = rng.choice([x for x in UNDRIVEN
+                              if x not in (e['h8'], e['h9']) + tuple(e['dummy'])])
     return e
 
 if __name__ == '__main__':

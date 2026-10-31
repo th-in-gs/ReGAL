@@ -17,14 +17,9 @@ def term(c):
         elif b == 2: lits.append(name)
     return ' & '.join(lits) or "1'b1"
 
-def describe(e):
-    read, write, init = paths(e)
-    f = lambda s: ' '.join(str(x) for x in s)
-    return read, write, init
-
 def emit(e, outdir):
     cov = sizes(e, covers=True)
-    read, write, init = paths(e)
+    read, write = paths(e)
     lines = []
     for name in ['t0', 't1', 't2', 't3', 't4', 'CS_n', 'PEND', 'CPUCLK']:
         n, c, inv = cov[name]
@@ -34,19 +29,17 @@ def emit(e, outdir):
     eqs = '\n\n'.join(lines)
     st = lambda s: ', '.join(str(x) for x in s)
     v = open(os.path.join(HERE, 'seq_template.v')).read()
-    v = v.replace('@READ@', st(read)).replace('@WRITE@', st(write)).replace('@INIT@', st(init))
-    v = v.replace('@FR@', str(e['fr'])).replace('@FW@', str(e['fw'])).replace('@FI@', str(e['fi']))
+    v = v.replace('@READ@', st(read)).replace('@WRITE@', st(write))
+    v = v.replace('@FR@', str(e['fr'])).replace('@FW@', str(e['fw']))
     v = v.replace('@EQS@', eqs)
-    for k in ['c1R', 'c1W', 'dH', 'dL']:
+    for k in ['c1', 'dH', 'dL']:
         v = v.replace('@%s@' % k, str(e[k]))
+    v = v.replace('@DUMMY@', ' and '.join(str(d) for d in e['dummy']))
     v = v.replace('@A@', ', '.join(str(a) for a in e['A']))
     open(outdir + '/seq.v', 'w').write(v)
 
-    eq = [0, 0, 1, 1, 1, 0, 0, 0]
-    ones = sorted(k for i, k in enumerate(e['init']) if eq[i])
     s = open(os.path.join(HERE, 'sio_template.v')).read()
-    s = s.replace('@EQIO@', ' || '.join('k == %d' % k for k in ones))
-    for k in ['c1R', 'c1W', 'dH', 'dL']:
+    for k in ['c1', 'dH', 'dL']:
         s = s.replace('@%s@' % k, str(e[k]))
     open(outdir + '/sio.v', 'w').write(s)
     open(outdir + '/encoding.py', 'w').write(
