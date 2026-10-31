@@ -1,8 +1,9 @@
-# KiCad schematic
+# KiCad project
 
 `sqi_ram.kicad_sch` is the interface as a KiCad 7 schematic, which KiCad 8
-and 9 also open, and `sqi_ram.kicad_pcb` is a board for it. Every part has a footprint: through-hole DIP packages,
-with sockets for the two GALs so they can be reprogrammed.
+and 9 also open, and `sqi_ram.kicad_pcb` is a ready-routed board for it.
+All parts are through-hole DIP packages, with sockets for the two GALs so
+they can be reprogrammed.
 
 ## Opening it
 
@@ -28,12 +29,13 @@ There are two ways to use it:
   `sqi_ram.kicad_sym` and its `sym-lib-table` entry into that project.
   Global labels connect by name, so either name the 8052's nets as above or
   rename the labels here.
-- **Make a new board.** Draw the 8052, its latch and reset circuit in this
-  project, or add a connector carrying the signals above.
+- **Use the board below.** It is a separate module that connects to the
+  8052 board through the J1 header.
 
-Then run Tools > Update PCB from Schematic (F8) in the PCB editor, place the
-parts and route. Keep the 32 MHz oscillator, U1, SCK and the 23LC512 close
-together, and give each chip its 100 nF capacitor right at its supply pins.
+If you change the schematic, run Tools > Update PCB from Schematic (F8) in
+the PCB editor: the footprints are linked to their symbols. Keep the
+32 MHz oscillator, U1, SCK and the 23LC512 close together, and each chip's
+100 nF capacitor right at its supply pins.
 
 ## PCB
 
