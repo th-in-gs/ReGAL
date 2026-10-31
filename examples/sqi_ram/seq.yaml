@@ -1,0 +1,16 @@
+device: GAL16V8
+mode: registered
+pins:
+    MCLK: 1
+    RD_n: 2
+    WR_n: 3
+    RST: 4
+
+    SCK: 19
+    K0: 18
+    K1: 17
+    K2: 16
+    K3: 15
+    CS_n: 14
+    CPUCLK: 13
+    PEND: 12

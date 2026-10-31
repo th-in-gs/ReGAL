@@ -1,0 +1,21 @@
+device: GAL16V8
+mode: complex
+pins:
+    K0: 1
+    K1: 2
+    K2: 3
+    K3: 4
+    PEND: 5
+    D0: 6
+    D1: 7
+    D2: 8
+    D3: 9
+    D4: 11
+    D5: 13
+    D6: 14
+    D7: 15
+
+    SIO0: 19
+    SIO1: 18
+    SIO2: 17
+    SIO3: 12
