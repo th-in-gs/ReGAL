@@ -2,15 +2,18 @@ import itertools
 import logging
 import os
 
+import pytest
+
 import regal
 
 from galsim import Gal16v8Sim
 
 
-def test_tristate(tmpdir):
+@pytest.mark.parametrize("rtl", ["tri.v", "tri_inv.v"])
+def test_tristate(tmpdir, rtl):
     netlist = str(tmpdir.join("netlist.json"))
     out = str(tmpdir.join("out.jed"))
-    assert regal.synth(netlist, os.path.join("tests", "samples", "tri.v"))
+    assert regal.synth(netlist, os.path.join("tests", "samples", rtl))
     assert regal.pnr(netlist, os.path.join("tests", "samples",
                                            "device_tri.yaml"), out)
 

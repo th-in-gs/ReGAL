@@ -52,3 +52,21 @@ generate
 endgenerate
 
 endmodule
+
+
+module \$_TBUF_ (A, E, Y);
+
+input A;
+input E;
+output Y;
+
+
+generate
+    GAL_TRI _TECHMAP_REPLACE_ (
+        .A (A),
+        .OE (E),
+        .Y (Y)
+    );
+endgenerate
+
+endmodule

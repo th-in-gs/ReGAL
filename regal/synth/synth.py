@@ -15,10 +15,8 @@ def synth(outfile, *infiles, **kwargs):
     yosys_commands = []
 
     gal_lib = files("regal.synth").joinpath("gal.v")
-    tri_file = files("regal.synth").joinpath("gal_tri.v")
     yosys_commands += [
         "read_verilog -lib {}".format(gal_lib),
-        "read_verilog -lib {}".format(tri_file),
         "hierarchy -check -top top",
         "proc",
         "opt"
@@ -26,7 +24,8 @@ def synth(outfile, *infiles, **kwargs):
 
     map_file = files("regal.synth").joinpath("gal_map.v")
     yosys_commands += [
-        "extract -map {}".format(tri_file),
+        # "OE ? A : 1'bz" and similar become $tribuf cells, then GAL_TRI
+        "tribuf",
         "opt",
         "techmap",
         "opt -nodffe -nosdff",

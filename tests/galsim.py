@@ -33,6 +33,15 @@ class Gal16v8Sim:
         term = 1
         for i, pad in enumerate(self.gal.inpads):
             value = values.get(pad, 0)
+            if value is None:
+                # A disabled output: only unused lines, which connect
+                # every column, may read it
+                if line[2 * i] == line[2 * i + 1] == 0:
+                    return 0
+                if line[2 * i] == 0 or line[2 * i + 1] == 0:
+                    raise AssertionError(
+                        "pin {} is read while floating".format(pad))
+                continue
             if line[2 * i] == 0:
                 term &= value
             if line[2 * i + 1] == 0:
