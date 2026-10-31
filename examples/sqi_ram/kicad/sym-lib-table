@@ -1,0 +1,7 @@
+(sym_lib_table
+  (lib
+    (name "sqi_ram")
+    (type "KiCad")
+    (uri "${KIPRJMOD}/sqi_ram.kicad_sym")
+    (options "")
+    (descr "23LC512 serial SRAM")))

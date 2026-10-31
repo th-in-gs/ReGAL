@@ -9,7 +9,9 @@ so the 8052 does not need to be fully static. It must accept clocks down
 to 3.5 MHz. SCK runs at 16 MHz, within the RAM's limit for both its
 industrial (20 MHz) and extended (16 MHz) temperature grades.
 
-This is a design study. It has been simulated, not built.
+This is a design study. It has been simulated, not built. `kicad/` has
+the schematic, with footprints, and `seq.jed` and `sio.jed` are the fuse
+maps to program the GALs with.
 
 ## Parts
 
